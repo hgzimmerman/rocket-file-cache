@@ -34,20 +34,11 @@ pub struct SizedFile {
     size: usize
 }
 
-/// The byte array shouldn't be visible in the debug log.
 impl fmt::Debug for SizedFile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // The byte array shouldn't be visible in the log.
         write!(f, "SizedFile {{ bytes: ..., size: {} }}", self.size )
     }
-}
-
-/// The structure that is returned when a request to the cache is made.
-/// The CachedFile structure knows its path, so it can set the extension type when it is serialized to a request.
-#[derive(Debug, Clone)]
-pub struct CachedFile {
-    path: PathBuf,
-    file: Arc<SizedFile>
-
 }
 
 
@@ -65,12 +56,26 @@ impl SizedFile {
     }
 }
 
+
+/// The structure that is returned when a request to the cache is made.
+/// The CachedFile knows its path, so it can set the content type when it is serialized to a request.
+#[derive(Debug, Clone)]
+pub struct CachedFile {
+    path: PathBuf,
+    file: Arc<SizedFile>
+
+}
+
+
+///
 /// Streams the named file to the client. Sets or overrides the Content-Type in
 /// the response according to the file's extension if the extension is
 /// recognized. See
 /// [ContentType::from_extension](/rocket/http/struct.ContentType.html#method.from_extension)
 /// for more information. If you would like to stream a file with a different
 /// Content-Type than that implied by its extension, use a `File` directly.
+///
+/// Based on NamedFile from rocket::response::NamedFile
 impl Responder<'static> for CachedFile {
     fn respond_to(self, _: &Request) -> result::Result<Response<'static>, Status> {
         let mut response = Response::new();
@@ -113,7 +118,7 @@ pub struct Cache {
 impl Cache {
 
     /// Creates a new Cache with the given size limit.
-    /// Currently the size_limit is representitive of the number of files stored in the Cache, but
+    /// Currently the size_limit is representative of the number of files stored in the Cache, but
     /// plans exist to make size limit represent the maximum number of bytes the Cache's file_map
     /// can hold.
     pub fn new(size_limit: usize) -> Cache {
@@ -187,7 +192,6 @@ impl Cache {
 
     /// Either gets the file from the cache, gets it from the filesystem and tries to cache it,
     /// or fails to find the file and returns None.
-
     pub fn get_or_cache(&mut self, pathbuf: PathBuf) -> Option<CachedFile> {
         trace!("{:#?}", self);
         // First try to get the file in the cache that corresponds to the desired path.
