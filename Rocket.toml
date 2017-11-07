@@ -1,0 +1,15 @@
+[development]
+address = "localhost"
+port = 8001
+workers = 2 
+log = "normal"
+limits = { forms = 32768 }
+
+# Use this for running bench tests to hide logs
+[staging]
+address = "0.0.0.0"
+port = 80
+workers = 2  
+log = "critical"
+limits = { forms = 32768 }
+
