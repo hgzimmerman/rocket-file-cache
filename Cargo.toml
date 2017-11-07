@@ -2,6 +2,11 @@
 name = "rocket-file-cache"
 version = "0.1.0"
 authors = ["Henry Zimmerman <zimhen7@gmail.com>"]
+exclude = [
+    "test/*",
+]
+
+
 
 [dependencies]
 rocket = "0.3.3"
