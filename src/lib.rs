@@ -3,7 +3,6 @@
 #![feature(test)]
 
 extern crate rocket;
-#[macro_use]
 extern crate rocket_codegen;
 
 
