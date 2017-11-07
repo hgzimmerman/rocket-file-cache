@@ -135,7 +135,7 @@ impl Cache {
     /// but the cache is full, a file will have to be removed from the cache to make room
     /// for the new file.
     pub fn store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> result::Result<(), String> {
-        debug!("Possibly storing file: {:?} in the Cache.");
+        debug!("Possibly storing file: {:?} in the Cache.", path);
         // If there is room in the hashmap, just add the file
         if self.size() < self.size_limit {
             self.file_map.insert(path.clone(), file);
