@@ -130,11 +130,11 @@ impl Cache {
     /// but the cache is full, a file will have to be removed from the cache to make room
     /// for the new file.
     pub fn store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> result::Result<(), String> {
-
+        debug!("Possibly storing file: {:?} in the Cache.");
         // If there is room in the hashmap, just add the file
         if self.size() < self.size_limit {
             self.file_map.insert(path.clone(), file);
-            info!("Inserting a file: {:?} into a not-full cache.", path);
+            debug!("Inserting a file: {:?} into a not-full cache.", path);
             return Ok(()) // Inserted successfully.
         }
 
@@ -144,19 +144,19 @@ impl Cache {
                 // It should early return if a file can be added without having to remove a file first.
                 let possible_store_count: usize = *self.access_count_map.get(&path).unwrap_or(&0usize);
                 // Currently this removes the file that has been accessed the least.
-                // TODO in the future, this should remove the file that has the lowest "score"
+                // TODO in the future, this should remove the file that has the lowest "score": Access count x sqrt(size)
                 if possible_store_count > lowest_count {
                     self.file_map.remove(&lowest_key);
                     self.file_map.insert(path.clone(), file);
-                    info!("Removing file: {:?} to make room for file: {:?}.", lowest_key, path);
+                    debug!("Removing file: {:?} to make room for file: {:?}.", lowest_key, path);
                     return Ok(())
                 } else {
-                    info!("File: {:?} has less demand than files already in the cache.", path);
+                    debug!("File: {:?} has less demand than files already in the cache.", path);
                     return Err(String::from("File demand for file is lower than files already in the cache"));
                 }
             }
             None => {
-                info!("Inserting first file: {:?} into cache.", path);
+                debug!("Inserting first file: {:?} into cache.", path);
                 self.file_map.insert(path, file);
                 Ok(())
             }
@@ -193,12 +193,12 @@ impl Cache {
         // First try to get the file in the cache that corresponds to the desired path.
         {
             if let Some(cache_file) = self.get(&pathbuf) {
-                info!("Cache hit for file: {:?}", pathbuf);
+                debug!("Cache hit for file: {:?}", pathbuf);
                 return Some(cache_file)
             }
         }
 
-        info!("Cache missed for file: {:?}", pathbuf);
+        debug!("Cache missed for file: {:?}", pathbuf);
         // Instead the file needs to read from the filesystem.
         let sized_file: Result<SizedFile> = SizedFile::open(pathbuf.as_path());
         // Check if the file read was a success.
@@ -210,7 +210,6 @@ impl Cache {
                 file: arc_file.clone()
             };
 
-            info!("Trying to add file {:?} to cache", pathbuf);
             let _ = self.store(pathbuf, arc_file); // possibly stores the cached file in the store.
             Some(cached_file)
         } else {
