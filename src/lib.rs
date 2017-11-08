@@ -245,7 +245,7 @@ impl Cache {
     /// or fails to find the file and returns None.
     pub fn get_or_cache(&mut self, pathbuf: PathBuf) -> Option<CachedFile> {
         trace!("{:#?}", self);
-        // First try to get the file in the cache that corresponds to the desired path.
+        // First, try to get the file in the cache that corresponds to the desired path.
         {
             if let Some(cache_file) = self.get(&pathbuf) {
                 debug!("Cache hit for file: {:?}", pathbuf);
@@ -255,9 +255,7 @@ impl Cache {
 
         debug!("Cache missed for file: {:?}", pathbuf);
         // Instead the file needs to read from the filesystem.
-        let sized_file: Result<SizedFile> = SizedFile::open(pathbuf.as_path());
-        // Check if the file read was a success.
-        if let Ok(file) = sized_file {
+        if let Ok(file) = SizedFile::open(pathbuf.as_path()) {
             // If the file was read, convert it to a cached file and attempt to store it in the cache
             let arc_file = Arc::new(file);
             let cached_file: CachedFile = CachedFile {
@@ -273,27 +271,22 @@ impl Cache {
         }
     }
 
-    // TODO doesn't use index yet.
     fn lowest_priority_in_file_map(&self, index: usize) -> Option<(PathBuf,usize,usize)> {
         if self.file_map.keys().len() == 0 {
             return None
         }
 
-        let mut lowest_priority: usize = usize::MAX;
-        let mut lowest_size: usize = usize::MAX;
-        let mut lowest_access_key: PathBuf = PathBuf::new();
-
-
         let mut priorities: Vec<(PathBuf,usize,usize)> = self.file_map.iter().map(|file| {
             let (file_key, sized_file) = file;
-            let access_count: usize = self.access_count_map.get(file_key).unwrap_or(&1usize).clone(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
+            let access_count: usize = self.access_count_map.get(file_key).unwrap_or(&1usize).clone();
             let size: usize = sized_file.size;
             let priority: usize = (self.priority_function)(access_count, size);
 
-            (file_key.clone(), priority, lowest_size)
+            (file_key.clone(), priority, size)
         }).collect();
 
         priorities.sort_by(|l,r| l.1.cmp(&r.1)); // sort by priority
+        println!("{:?}", priorities);
         return Some(priorities.remove(index)); // TODO, verify that the list is sorted correctly so the index is extracting the LOWEST priority
 
         // TODO sort by priority, get index of lowest priority
