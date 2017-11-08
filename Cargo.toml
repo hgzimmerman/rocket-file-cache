@@ -6,7 +6,12 @@ exclude = [
     "test/*",
 ]
 
+description = " An in-memory file cache for the Rocket web framework."
 
+homepage = "https://github.com/hgzimmerman/rocket-file-cache"
+repository = "https://github.com/hgzimmerman/rocket-file-cache"
+
+license-file = "LICENSE"
 
 [dependencies]
 rocket = "0.3.3"
