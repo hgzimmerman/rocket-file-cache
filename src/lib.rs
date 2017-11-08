@@ -284,20 +284,32 @@ impl Cache {
         let mut lowest_access_key: PathBuf = PathBuf::new();
 
 
-        // TODO sort by priority, get index of lowest priority
-        for file in self.file_map.iter() {
+        let mut priorities: Vec<(PathBuf,usize,usize)> = self.file_map.iter().map(|file| {
             let (file_key, sized_file) = file;
             let access_count: usize = self.access_count_map.get(file_key).unwrap_or(&1usize).clone(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
             let size: usize = sized_file.size;
             let priority: usize = (self.priority_function)(access_count, size);
 
-            if priority < lowest_priority {
-                lowest_priority = priority.clone();
-                lowest_access_key = file_key.clone();
-                lowest_size = size.clone();
-            }
-        }
-        Some((lowest_access_key, lowest_priority, lowest_size))
+            (file_key.clone(), priority, lowest_size)
+        }).collect();
+
+        priorities.sort_by(|l,r| l.1.cmp(&r.1)); // sort by priority
+        return Some(priorities.remove(index)); // TODO, verify that the list is sorted correctly so the index is extracting the LOWEST priority
+
+        // TODO sort by priority, get index of lowest priority
+//        for file in self.file_map.iter() {
+//            let (file_key, sized_file) = file;
+//            let access_count: usize = self.access_count_map.get(file_key).unwrap_or(&1usize).clone(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
+//            let size: usize = sized_file.size;
+//            let priority: usize = (self.priority_function)(access_count, size);
+//
+//            if priority < lowest_priority {
+//                lowest_priority = priority.clone();
+//                lowest_access_key = file_key.clone();
+//                lowest_size = size.clone();
+//            }
+//        }
+//        Some((lowest_access_key, lowest_priority, lowest_size))
 
     }
 
