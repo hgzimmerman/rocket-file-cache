@@ -96,7 +96,17 @@ impl Responder<'static> for CachedFile {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum CacheInvalidationError {
+    NoMoreFilesToRemove,
+    NewPriorityIsNotHighEnough
+}
 
+#[derive(Debug, PartialEq)]
+pub enum CacheInvalidationSuccess {
+    ReplacedFile,
+    SpaceAvailableInsertedFile
+}
 
 /// The Cache holds a set number of files.
 /// The Cache acts as a proxy to the filesystem.
@@ -134,14 +144,14 @@ impl Cache {
     /// If the provided file has more more access attempts than one of the files in the cache,
     /// but the cache is full, a file will have to be removed from the cache to make room
     /// for the new file.
-    pub fn store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> result::Result<(), String> {
+    pub fn store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> result::Result<CacheInvalidationSuccess, CacheInvalidationError> {
         debug!("Possibly storing file: {:?} in the Cache.", path);
         // If there is room in the hashmap, just add the file
-        if self.size() < self.size_limit {
-            self.file_map.insert(path.clone(), file);
-            debug!("Inserting a file: {:?} into a not-full cache.", path);
-            return Ok(()) // Inserted successfully.
-        }
+//        if file.size < self.size_limit {
+//            self.file_map.insert(path.clone(), file);
+//            debug!("Inserting a file: {:?} into a not-full cache.", path);
+//            return Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile) // Inserted successfully.
+//        }
 
 
         let required_space_for_new_file: isize =  (self.size_bytes() as isize + file.size as isize) - self.size_limit as isize;
@@ -150,7 +160,7 @@ impl Cache {
         if required_space_for_new_file < 0 {
             debug!("Cache has room for the file.");
             self.file_map.insert(path, file);
-            Ok(())
+            Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile)
         } else {// Otherwise, the cache will have to try to make some room for the new file
 
             let new_file_access_count: usize = *self.access_count_map.get(&path).unwrap_or(&0usize);
@@ -160,11 +170,11 @@ impl Cache {
                 Ok(_) => {
                     debug!("Made room in the cache for file and is now adding it");
                     self.file_map.insert(path, file);
-                    Ok(())
+                    Ok(CacheInvalidationSuccess::ReplacedFile)
                 }
                 Err(_) => {
                     debug!("The file does not have enough priority or is too large to be accepted into the cache.");
-                    return Err(String::from("File demand for file is lower than files already in the cache"));
+                    return Err(CacheInvalidationError::NewPriorityIsNotHighEnough);
 
                 }
             }
@@ -263,6 +273,7 @@ impl Cache {
         }
     }
 
+    // TODO doesn't use index yet.
     fn lowest_priority_in_file_map(&self, index: usize) -> Option<(PathBuf,usize,usize)> {
         if self.file_map.keys().len() == 0 {
             return None
@@ -272,9 +283,11 @@ impl Cache {
         let mut lowest_size: usize = usize::MAX;
         let mut lowest_access_key: PathBuf = PathBuf::new();
 
+
+        // TODO sort by priority, get index of lowest priority
         for file in self.file_map.iter() {
             let (file_key, sized_file) = file;
-            let access_count: usize = self.access_count_map.get(file_key).unwrap().clone(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
+            let access_count: usize = self.access_count_map.get(file_key).unwrap_or(&1usize).clone(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
             let size: usize = sized_file.size;
             let priority: usize = (self.priority_function)(access_count, size);
 
@@ -371,7 +384,7 @@ mod tests {
         cache.lock().unwrap().get_or_cache(pathbuf)
     }
     fn init_cache_rocket() -> Rocket {
-        let cache: Mutex<Cache> = Mutex::new(Cache::new(10));
+        let cache: Mutex<Cache> = Mutex::new(Cache::new(11000000)); // Cache can hold 11Mib
         rocket::ignite()
             .manage(cache)
             .mount("/", routes![cache_files])
@@ -450,13 +463,47 @@ mod tests {
     }
 
     // Comparison test
-    #[bench]
+//    #[bench]
     fn clone5mib(b: &mut Bencher) {
         use rand::{StdRng, Rng};
         let mut megs2: Box<[u8; 5000000]> = Box::new([0u8; 5000000]);
         StdRng::new().unwrap().fill_bytes(megs2.as_mut());
+
         b.iter(|| {
             megs2.clone()
         });
+    }
+
+    #[test]
+    fn file_exceeds_size_limit() {
+        let mut cache: Cache = Cache::new(8000000); //Cache can hold only 8Mib
+        let path: PathBuf = PathBuf::from("test/".to_owned()+TEN_MEGS);
+        assert_eq!(cache.store(path.clone(), Arc::new(SizedFile::open(path.clone()).unwrap())), Err(CacheInvalidationError::NewPriorityIsNotHighEnough))
+    }
+
+    #[test]
+    fn file_replaces_other_file() {
+        let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
+        let path_5: PathBuf = PathBuf::from("test/".to_owned()+FIVE_MEGS);
+        let path_1: PathBuf = PathBuf::from("test/".to_owned()+ONE_MEG);
+        assert_eq!(
+            cache.store(path_5.clone(), Arc::new(SizedFile::open(path_5.clone()).unwrap())),
+            Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile)
+        );
+        cache.get(&path_1); // getting the file here will increment the access count, causing it to have a higher priority the next time it tries to be stored.
+        assert_eq!(
+            cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
+            Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
+        );
+        cache.get(&path_1);
+        assert_eq!(
+            cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
+            Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
+        );
+        cache.get(&path_1);
+        assert_eq!(
+            cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
+            Ok(CacheInvalidationSuccess::ReplacedFile)
+        );
     }
 }
