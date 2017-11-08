@@ -1,28 +1,28 @@
-# rocket-file-cache
+# Rocket File Cache
 An in-memory file cache for the Rocket web framework.
 
 Rocket File Cache can be used as a drop in replacement for Rocket's NamedFile when serving files.
 
+This:
 ```rust
 #[get("/<file..>")]
 fn files(file: PathBuf) -> Option<NamedFile> {
     NamedFile::open(Path::new("static/").join(file)).ok()
 }
 ```
-
+Can be replaced with:
 ```rust
 fn main() {
-    let cache: Mutex<Cache> = Mutex::new(Cache::new(10));
+    let cache: Mutex<Cache> = Mutex::new(Cache::new(1024 * 1024 * 10)); // 10 megabytes
     rocket::ignite()
         .manage(cache)
-        .mount("/", routes![files,])
+        .mount("/", routes![files])
         .launch();
 }
 
-
 #[get("/<file..>")]
 fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<CachedFile> {
-    let pathbuf: PathBuf = Path::new("www/").join(file.clone()).to_owned();
+    let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
     cache.lock().unwrap().get_or_cache(pathbuf)
 }
 ```
@@ -33,7 +33,7 @@ Rocket File Cache keeps a set of frequently accessed files in memory so your web
 This should improve latency and throughput on systems that are bottlenecked on disk I/O.
 
 # Performance
-Running the bench tests in the repository on a computer with an Intel(R) Core(TM) i7-6700K CPU @ 4.00GHz, with a Samsung SSD 950 PRO 512 NVME SSD:
+Running the bench tests that used to be in the repository on a computer with an Intel i7-6700K CPU @ 4.00GHz, with a Samsung NVME SSD 950 PRO 512 GB:
 ```
 test tests::cache_access_10mib ... bench:   3,588,455 ns/iter (+/- 1,492,613)
 test tests::cache_access_1mib  ... bench:      32,141 ns/iter (+/- 839)
@@ -52,12 +52,7 @@ I cannot recommend the use of this library outside of that use case until furthe
 
 # Warning
 This crate is still under development.
-Currently, the cache is initialized with a size limit that determines the number of files it can hold.
-I intend to change the size limit to reflect the number of bytes the cache can hold.
-This change will break any use of the cache that expects to hold 10 files, as after the change, it will only be able to hold 10 bytes.
-This will necessitate coming up with a new scheme for determining the whether files should be stored in the cache or not.
-
+Cache invalidation is still a work in progress.
 
 # Documentation
-There is no documentation.
-This will change soon.
+Documentation can be found here: https://docs.rs/crate/rocket-file-cache
