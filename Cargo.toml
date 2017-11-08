@@ -1,12 +1,13 @@
 [package]
 name = "rocket-file-cache"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Henry Zimmerman <zimhen7@gmail.com>"]
 exclude = [
     "test/*",
 ]
 
-description = " An in-memory file cache for the Rocket web framework."
+description = "An in-memory file cache for the Rocket web framework."
+readme = "README.md"
 
 homepage = "https://github.com/hgzimmerman/rocket-file-cache"
 repository = "https://github.com/hgzimmerman/rocket-file-cache"
