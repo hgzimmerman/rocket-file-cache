@@ -16,7 +16,7 @@ license-file = "LICENSE"
 
 [dependencies]
 rocket = "0.3.3"
-rocket_codegen = "0.3.3"
+#rocket_codegen = "0.3.3"
 log = "0.3.8"
 #simplelog = "^0.4.2"
 rand = "0.3"
