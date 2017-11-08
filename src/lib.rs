@@ -108,6 +108,7 @@ impl Responder<'static> for CachedFile {
 #[derive(Debug)]
 pub struct Cache {
     size_limit: usize, // Currently this is being used as the number of elements in the cache, but should be used as the number of bytes in the hashmap.
+    priority_function: PriorityFunction,
     file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
     access_count_map: HashMap<PathBuf, usize> // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
@@ -122,6 +123,7 @@ impl Cache {
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
+            priority_function: Cache::DEFAULT_PRIORITY_FUNCTION,
             file_map: HashMap::new(),
             access_count_map: HashMap::new()
         }
@@ -141,29 +143,70 @@ impl Cache {
             return Ok(()) // Inserted successfully.
         }
 
-        match self.lowest_access_count_in_file_map() {
-            Some(lowest) => {
-                let (lowest_count, lowest_key) = lowest;
-                // It should early return if a file can be added without having to remove a file first.
-                let possible_store_count: usize = *self.access_count_map.get(&path).unwrap_or(&0usize);
-                // Currently this removes the file that has been accessed the least.
-                // TODO in the future, this should remove the file that has the lowest "score": Access count x sqrt(size)
-                if possible_store_count > lowest_count {
-                    self.file_map.remove(&lowest_key);
-                    self.file_map.insert(path.clone(), file);
-                    debug!("Removing file: {:?} to make room for file: {:?}.", lowest_key, path);
-                    return Ok(())
-                } else {
-                    debug!("File: {:?} has less demand than files already in the cache.", path);
+
+        let required_space_for_new_file: isize =  (self.size_bytes() as isize + file.size as isize) - self.size_limit as isize;
+
+        // If there is negative required space, then we can just add the file to the cache, as it will fit.
+        if required_space_for_new_file < 0 {
+            debug!("Cache has room for the file.");
+            self.file_map.insert(path, file);
+            Ok(())
+        } else {// Otherwise, the cache will have to try to make some room for the new file
+
+            let new_file_access_count: usize = *self.access_count_map.get(&path).unwrap_or(&0usize);
+            let new_file_priority: usize = (self.priority_function)(new_file_access_count, file.size);
+
+            match self.make_room_for_new_file(required_space_for_new_file as usize , new_file_priority) {
+                Ok(_) => {
+                    debug!("Made room in the cache for file and is now adding it");
+                    self.file_map.insert(path, file);
+                    Ok(())
+                }
+                Err(_) => {
+                    debug!("The file does not have enough priority or is too large to be accepted into the cache.");
                     return Err(String::from("File demand for file is lower than files already in the cache"));
+
                 }
             }
-            None => {
-                debug!("Inserting first file: {:?} into cache.", path);
-                self.file_map.insert(path, file);
-                Ok(())
+        }
+    }
+
+    /// Remove the n lowest priority files to make room for a file with a size: required_space.
+    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> result::Result<(), String> { // TODO come up with a better result type.
+        let mut possibly_freed_space: usize = 0;
+        let mut priority_score_to_free: usize = 0;
+        let mut file_paths_to_remove: Vec<PathBuf> = vec!();
+        let mut lowest_file_index: usize = 0; // we need an index into the n lowest priority files.
+
+        /// Loop until the more bytes can freed than the number of bytes that are required.
+        while possibly_freed_space < required_space {
+            match self.lowest_priority_in_file_map(lowest_file_index) {
+                Some(lowest) => {
+                    let (lowest_key, lowest_file_priority, lowest_file_size) = lowest;
+
+                    possibly_freed_space += lowest_file_size;
+                    priority_score_to_free += lowest_file_priority;
+                    file_paths_to_remove.push(lowest_key.clone());
+
+                    // Check if total priority to free is greater than the new file's priority,
+                    // If it is, then don't free the files, as they in aggregate, are more important
+                    // than the new file.
+                    if priority_score_to_free > new_file_priority {
+                        return Err(String::from("Priority isn't high enough"))
+                    }
+
+                }
+                None => {
+                    return Err(String::from("No more files to remove.")); // There arent any more files to store OR the file to store is too big TODO catch this edge case
+                }
             }
         }
+
+        // If this hasn't returned early, then the files to remove are less important than the new file.
+        for file in file_paths_to_remove {
+            self.file_map.remove(&file);
+        }
+        return Ok(());
     }
 
     /// Increments the access count.
@@ -220,6 +263,31 @@ impl Cache {
         }
     }
 
+    fn lowest_priority_in_file_map(&self, index: usize) -> Option<(PathBuf,usize,usize)> {
+        if self.file_map.keys().len() == 0 {
+            return None
+        }
+
+        let mut lowest_priority: usize = usize::MAX;
+        let mut lowest_size: usize = usize::MAX;
+        let mut lowest_access_key: PathBuf = PathBuf::new();
+
+        for file in self.file_map.iter() {
+            let (file_key, sized_file) = file;
+            let access_count: usize = self.access_count_map.get(file_key).unwrap().clone(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
+            let size: usize = sized_file.size;
+            let priority: usize = (self.priority_function)(access_count, size);
+
+            if priority < lowest_priority {
+                lowest_priority = priority.clone();
+                lowest_access_key = file_key.clone();
+                lowest_size = size.clone();
+            }
+        }
+        Some((lowest_access_key, lowest_priority, lowest_size))
+
+    }
+
     /// Gets the file with the lowest access count in the hashmap.
     fn lowest_access_count_in_file_map(&self) -> Option<(usize,PathBuf)> {
         if self.file_map.keys().len() == 0 {
@@ -232,7 +300,7 @@ impl Cache {
         for file_key in self.file_map.keys() {
             let access_count: &usize = self.access_count_map.get(file_key).unwrap(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
             if access_count < &lowest_access_count {
-                lowest_access_count = access_count + 0;
+                lowest_access_count = access_count.clone();
                 lowest_access_key = file_key.clone();
             }
         }
@@ -277,6 +345,7 @@ impl Cache {
 /// Custom type of function that is used to determine how to add files to the cache.
 /// The first term will be assigned the access count of the file in question, while the second term will be assigned the size (in bytes) of the file in question.
 /// The result will represent the priority of the file to remain in or be added to the cache.
+/// The files with the largest priorities will be kept in the cache.
 ///
 /// A closure that matches this type signature can be specified at cache instantiation to define how it will keep items in the cache.
 pub type PriorityFunction = fn(usize, usize) -> usize;
