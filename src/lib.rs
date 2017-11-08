@@ -146,13 +146,6 @@ impl Cache {
     /// for the new file.
     pub fn store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> result::Result<CacheInvalidationSuccess, CacheInvalidationError> {
         debug!("Possibly storing file: {:?} in the Cache.", path);
-        // If there is room in the hashmap, just add the file
-//        if file.size < self.size_limit {
-//            self.file_map.insert(path.clone(), file);
-//            debug!("Inserting a file: {:?} into a not-full cache.", path);
-//            return Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile) // Inserted successfully.
-//        }
-
 
         let required_space_for_new_file: isize =  (self.size_bytes() as isize + file.size as isize) - self.size_limit as isize;
 
@@ -161,10 +154,11 @@ impl Cache {
             debug!("Cache has room for the file.");
             self.file_map.insert(path, file);
             Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile)
-        } else {// Otherwise, the cache will have to try to make some room for the new file
+        } else { // Otherwise, the cache will have to try to make some room for the new file
 
             let new_file_access_count: usize = *self.access_count_map.get(&path).unwrap_or(&0usize);
             let new_file_priority: usize = (self.priority_function)(new_file_access_count, file.size);
+
 
             match self.make_room_for_new_file(required_space_for_new_file as usize , new_file_priority) {
                 Ok(_) => {
@@ -220,12 +214,9 @@ impl Cache {
     }
 
     /// Increments the access count.
-    // TODO Currently the access count will be incremented regardless of whether the file exists in the filesystem, consider breaking the increment step into another function.
-    ///
     /// Gets the file from the cache if it exists.
     pub fn get(&mut self, path: &PathBuf) -> Option<CachedFile> {
-        let count: &mut usize = self.access_count_map.entry(path.to_path_buf()).or_insert(0usize);
-        *count += 1; // Increment the access count
+//        self.increment_access_count(path);
         match self.file_map.get(path) {
             Some(sized_file) => {
                 Some(
@@ -236,9 +227,16 @@ impl Cache {
                 )
             }
             None => None
-
         }
 
+    }
+
+    /// Helper function for incrementing the access count for a given file name.
+    ///
+    /// This should only be used in cases where the file is known to exist, to avoid bloating the access count map with useless values.
+    fn increment_access_count(&mut self, path: &PathBuf) {
+        let count: &mut usize = self.access_count_map.entry(path.to_path_buf()).or_insert(0usize);
+        *count += 1; // Increment the access count
     }
 
     /// Either gets the file from the cache, gets it from the filesystem and tries to cache it,
@@ -249,6 +247,7 @@ impl Cache {
         {
             if let Some(cache_file) = self.get(&pathbuf) {
                 debug!("Cache hit for file: {:?}", pathbuf);
+                self.increment_access_count(&pathbuf); // File is in the cache, increment the count
                 return Some(cache_file)
             }
         }
@@ -256,8 +255,9 @@ impl Cache {
         debug!("Cache missed for file: {:?}", pathbuf);
         // Instead the file needs to read from the filesystem.
         if let Ok(file) = SizedFile::open(pathbuf.as_path()) {
+            self.increment_access_count(&pathbuf); // Because the file exists, but is not in the cache, increment the access count
             // If the file was read, convert it to a cached file and attempt to store it in the cache
-            let arc_file = Arc::new(file);
+            let arc_file: Arc<SizedFile> = Arc::new(file);
             let cached_file: CachedFile = CachedFile {
                 path: pathbuf.clone(),
                 file: arc_file.clone()
@@ -286,53 +286,10 @@ impl Cache {
         }).collect();
 
         priorities.sort_by(|l,r| l.1.cmp(&r.1)); // sort by priority
-        println!("{:?}", priorities);
+//        println!("Priorities: {:?}", priorities);
         return Some(priorities.remove(index)); // TODO, verify that the list is sorted correctly so the index is extracting the LOWEST priority
-
-        // TODO sort by priority, get index of lowest priority
-//        for file in self.file_map.iter() {
-//            let (file_key, sized_file) = file;
-//            let access_count: usize = self.access_count_map.get(file_key).unwrap_or(&1usize).clone(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
-//            let size: usize = sized_file.size;
-//            let priority: usize = (self.priority_function)(access_count, size);
-//
-//            if priority < lowest_priority {
-//                lowest_priority = priority.clone();
-//                lowest_access_key = file_key.clone();
-//                lowest_size = size.clone();
-//            }
-//        }
-//        Some((lowest_access_key, lowest_priority, lowest_size))
-
     }
 
-    /// Gets the file with the lowest access count in the hashmap.
-    fn lowest_access_count_in_file_map(&self) -> Option<(usize,PathBuf)> {
-        if self.file_map.keys().len() == 0 {
-            return None
-        }
-
-        let mut lowest_access_count: usize = usize::MAX;
-        let mut lowest_access_key: PathBuf = PathBuf::new();
-
-        for file_key in self.file_map.keys() {
-            let access_count: &usize = self.access_count_map.get(file_key).unwrap(); // It is guaranteed for the access count entry to exist if the file_map entry exists.
-            if access_count < &lowest_access_count {
-                lowest_access_count = access_count.clone();
-                lowest_access_key = file_key.clone();
-            }
-        }
-        Some((lowest_access_count, lowest_access_key))
-    }
-
-    /// Gets the number of files in the file_map.
-    fn size(&self) -> usize {
-        let mut size: usize = 0;
-        for _ in self.file_map.keys() {
-            size += 1;
-        }
-        size
-    }
 
     /// Gets the size of the files that constitute the file_map.
     fn size_bytes(&self) -> usize {
@@ -340,7 +297,6 @@ impl Cache {
             size +  x.1.size
         })
     }
-
 
 
 
@@ -495,17 +451,17 @@ mod tests {
             cache.store(path_5.clone(), Arc::new(SizedFile::open(path_5.clone()).unwrap())),
             Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile)
         );
-        cache.get(&path_1); // getting the file here will increment the access count, causing it to have a higher priority the next time it tries to be stored.
+        cache.increment_access_count(&path_1); // increment the access count, causing it to have a higher priority the next time it tries to be stored.
         assert_eq!(
             cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         );
-        cache.get(&path_1);
+        cache.increment_access_count(&path_1);
         assert_eq!(
             cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         );
-        cache.get(&path_1);
+        cache.increment_access_count(&path_1);
         assert_eq!(
             cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
             Ok(CacheInvalidationSuccess::ReplacedFile)
