@@ -62,11 +62,10 @@ impl SizedFile {
 pub struct CachedFile {
     path: PathBuf,
     file: Arc<SizedFile>
-
 }
 
 
-///
+
 /// Streams the named file to the client. Sets or overrides the Content-Type in
 /// the response according to the file's extension if the extension is
 /// recognized. See
