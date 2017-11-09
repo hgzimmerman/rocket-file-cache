@@ -26,6 +26,7 @@ use std::fmt;
 use std::sync::Arc;
 
 /// The structure that represents a file in memory.
+/// Keeps a copy of the size of the file.
 #[derive(Clone)]
 pub struct SizedFile {
     bytes: Vec<u8>,
@@ -41,6 +42,8 @@ impl fmt::Debug for SizedFile {
 
 
 impl SizedFile {
+
+    /// Reads the file at the path into a SizedFile.
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<SizedFile> {
         let file = File::open(path.as_ref())?;
         let mut reader = BufReader::new(file);
@@ -104,7 +107,7 @@ pub enum CacheInvalidationError {
 #[derive(Debug, PartialEq)]
 pub enum CacheInvalidationSuccess {
     ReplacedFile,
-    SpaceAvailableInsertedFile
+    InsertedFileIntoAvailableSpace
 }
 
 /// The Cache holds a set number of files.
@@ -143,7 +146,7 @@ impl Cache {
     /// If the provided file has more more access attempts than one of the files in the cache,
     /// but the cache is full, a file will have to be removed from the cache to make room
     /// for the new file.
-    pub fn store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> result::Result<CacheInvalidationSuccess, CacheInvalidationError> {
+    pub fn try_store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> result::Result<CacheInvalidationSuccess, CacheInvalidationError> {
         debug!("Possibly storing file: {:?} in the Cache.", path);
 
         let required_space_for_new_file: isize =  (self.size_bytes() as isize + file.size as isize) - self.size_limit as isize;
@@ -152,8 +155,9 @@ impl Cache {
         if required_space_for_new_file < 0 {
             debug!("Cache has room for the file.");
             self.file_map.insert(path, file);
-            Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile)
-        } else { // Otherwise, the cache will have to try to make some room for the new file
+            Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
+        } else {
+            // Otherwise, the cache will have to try to make some room for the new file
 
             let new_file_access_count: usize = *self.access_count_map.get(&path).unwrap_or(&0usize);
             let new_file_priority: usize = (self.priority_function)(new_file_access_count, file.size);
@@ -179,11 +183,12 @@ impl Cache {
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec!();
-        let mut lowest_file_index: usize = 0; // we need an index into the n lowest priority files.
+        //let mut lowest_file_index: usize = 0; // we need an index into the n lowest priority files.
 
-        // Loop until the more bytes can freed than the number of bytes that are required.
+        let mut priorities: Vec<(PathBuf,usize,usize)> = self.sorted_priorities();
         while possibly_freed_space < required_space {
-            match self.lowest_priority_in_file_map(lowest_file_index) {
+            // pop the priority group with the lowest priority off of the vector
+            match priorities.pop() {
                 Some(lowest) => {
                     let (lowest_key, lowest_file_priority, lowest_file_size) = lowest;
 
@@ -197,17 +202,41 @@ impl Cache {
                     if priority_score_to_free > new_file_priority {
                         return Err(String::from("Priority isn't high enough"))
                     }
-
-                }
+                },
                 None => {
-                    return Err(String::from("No more files to remove.")); // There arent any more files to store OR the file to store is too big TODO catch this edge case
+                    return Err(String::from("no more files to remove"))
                 }
-            }
-
-            // Increment the lowest file index, so the next time lowest_priority_in_file_map() runs,
-            // It will access the file with the next lowest priority.
-            lowest_file_index += 1;
+            };
         }
+
+
+        // Loop until the more bytes can freed than the number of bytes that are required.
+//        while possibly_freed_space < required_space {
+//            match self.lowest_priority_in_file_map(lowest_file_index) {
+//                Some(lowest) => {
+//                    let (lowest_key, lowest_file_priority, lowest_file_size) = lowest;
+//
+//                    possibly_freed_space += lowest_file_size;
+//                    priority_score_to_free += lowest_file_priority;
+//                    file_paths_to_remove.push(lowest_key.clone());
+//
+//                    // Check if total priority to free is greater than the new file's priority,
+//                    // If it is, then don't free the files, as they in aggregate, are more important
+//                    // than the new file.
+//                    if priority_score_to_free > new_file_priority {
+//                        return Err(String::from("Priority isn't high enough"))
+//                    }
+//
+//                }
+//                None => {
+//                    return Err(String::from("No more files to remove.")); // There arent any more files to store OR the file to store is too big TODO catch this edge case
+//                }
+//            }
+//
+//            // Increment the lowest file index, so the next time lowest_priority_in_file_map() runs,
+//            // It will access the file with the next lowest priority.
+//            lowest_file_index += 1;
+//        }
 
         // If this hasn't returned early, then the files to remove are less important than the new file.
         for file in file_paths_to_remove {
@@ -216,10 +245,8 @@ impl Cache {
         return Ok(());
     }
 
-    /// Increments the access count.
-    /// Gets the file from the cache if it exists.
-    pub fn get(&mut self, path: &PathBuf) -> Option<CachedFile> {
-//        self.increment_access_count(path);
+    ///Helper function that gets the file from the cache if it exists there.
+    fn get(&mut self, path: &PathBuf) -> Option<CachedFile> {
         match self.file_map.get(path) {
             Some(sized_file) => {
                 Some(
@@ -229,7 +256,7 @@ impl Cache {
                     }
                 )
             }
-            None => None
+            None => None // File not found
         }
 
     }
@@ -266,7 +293,7 @@ impl Cache {
                 file: arc_file.clone()
             };
 
-            let _ = self.store(pathbuf, arc_file); // possibly stores the cached file in the store.
+            let _ = self.try_store(pathbuf, arc_file); // possibly stores the cached file in the store.
             Some(cached_file)
         } else {
             // Indicate that the file was not found in either the filesystem or cache.
@@ -274,10 +301,12 @@ impl Cache {
         }
     }
 
-    fn lowest_priority_in_file_map(&self, index: usize) -> Option<(PathBuf,usize,usize)> {
-        if self.file_map.keys().len() == 0 {
-            return None
-        }
+    // TODO this is a pretty operation that is called multiple times, it may make sense to use an
+    // alternative datastructure for holding priorities persistently, or just return the whole vector
+    // and index into that to remove the need of calling this multiple times.
+    /// Gets a tuple containing the Path, priority score, and size in bytes of the entry in
+    /// the file_map with the lowest priority score.
+    fn sorted_priorities(&self) -> Vec<(PathBuf,usize,usize)> {
 
         let mut priorities: Vec<(PathBuf,usize,usize)> = self.file_map.iter().map(|file| {
             let (file_key, sized_file) = file;
@@ -290,7 +319,7 @@ impl Cache {
 
         priorities.sort_by(|l,r| l.1.cmp(&r.1)); // sort by priority
 //        println!("Priorities: {:?}", priorities);
-        return Some(priorities.remove(index)); // TODO, verify that the list is sorted correctly so the index is extracting the LOWEST priority
+        priorities // TODO, verify that the list is sorted correctly so the index is extracting the LOWEST priority
     }
 
 
@@ -443,7 +472,7 @@ mod tests {
     fn file_exceeds_size_limit() {
         let mut cache: Cache = Cache::new(8000000); //Cache can hold only 8Mib
         let path: PathBuf = PathBuf::from("test/".to_owned()+TEN_MEGS);
-        assert_eq!(cache.store(path.clone(), Arc::new(SizedFile::open(path.clone()).unwrap())), Err(CacheInvalidationError::NewPriorityIsNotHighEnough))
+        assert_eq!(cache.try_store(path.clone(), Arc::new(SizedFile::open(path.clone()).unwrap())), Err(CacheInvalidationError::NewPriorityIsNotHighEnough))
     }
 
     #[test]
@@ -452,22 +481,22 @@ mod tests {
         let path_5: PathBuf = PathBuf::from("test/".to_owned()+FIVE_MEGS);
         let path_1: PathBuf = PathBuf::from("test/".to_owned()+ONE_MEG);
         assert_eq!(
-            cache.store(path_5.clone(), Arc::new(SizedFile::open(path_5.clone()).unwrap())),
-            Ok(CacheInvalidationSuccess::SpaceAvailableInsertedFile)
+            cache.try_store(path_5.clone(), Arc::new(SizedFile::open(path_5.clone()).unwrap())),
+            Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
         );
         cache.increment_access_count(&path_1); // increment the access count, causing it to have a higher priority the next time it tries to be stored.
         assert_eq!(
-            cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
+            cache.try_store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         );
         cache.increment_access_count(&path_1);
         assert_eq!(
-            cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
+            cache.try_store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         );
         cache.increment_access_count(&path_1);
         assert_eq!(
-            cache.store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
+            cache.try_store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
             Ok(CacheInvalidationSuccess::ReplacedFile)
         );
     }
