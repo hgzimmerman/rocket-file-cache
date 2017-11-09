@@ -181,6 +181,9 @@ impl Cache {
     /// Remove the n lowest priority files to make room for a file with a size: required_space.
     ///
     /// If this returns an OK, this function has removed the required file space from the file_map.
+    /// If this returns an Err, then either not enough space could be freed, or the priority of
+    /// files that would need to be freed to make room for the new file is greater than the
+    /// new file's priority, and as result no memory was freed.
     fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> result::Result<(), String> { // TODO come up with a better result type.
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
