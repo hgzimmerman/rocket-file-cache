@@ -1,7 +1,7 @@
 use cache::Cache;
-use super::PriorityFunction;
 
 use std::collections::HashMap;
+use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
 
 #[derive(Debug, PartialEq)]
 pub enum CacheBuildError {
@@ -68,7 +68,7 @@ impl CacheBuilder {
 
         let priority_function: PriorityFunction = match self.priority_function {
             Some(p) => p,
-            None => Cache::DEFAULT_PRIORITY_FUNCTION
+            None => DEFAULT_PRIORITY_FUNCTION
         };
 
         if let Some(min_file_size) = self.min_file_size {

@@ -5,7 +5,7 @@ use std::usize;
 
 use cached_file::CachedFile;
 use sized_file::SizedFile;
-use super::PriorityFunction;
+use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
 
 
 
@@ -51,7 +51,7 @@ impl Cache {
             size_limit,
             min_file_size: None,
             max_file_size: None,
-            priority_function: Cache::DEFAULT_PRIORITY_FUNCTION,
+            priority_function: DEFAULT_PRIORITY_FUNCTION,
             file_map: HashMap::new(),
             access_count_map: HashMap::new(),
         }
@@ -242,18 +242,7 @@ impl Cache {
 
 
 
-    /// The default priority function used for determining if a file should be in the cache
-    /// This function takes the square root of the size of the file times the number of times it has been accessed.
-    fn balanced_priority(access_count: usize, size: usize) -> usize {
-        ((size as f64).sqrt() as usize) * access_count
-    }
-    pub const DEFAULT_PRIORITY_FUNCTION: PriorityFunction = Cache::balanced_priority;
 
-    /// This priority function will value files in the cache based solely on the number of times the file is accessed.
-    fn access_priority(access_count: usize, _: usize) -> usize {
-        access_count
-    }
-    pub const ACCESS_PRIORITY_FUNCTION: PriorityFunction = Cache::access_priority;
 }
 
 
