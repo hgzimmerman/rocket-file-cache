@@ -82,6 +82,8 @@ impl CacheBuilder {
         Ok(
             Cache {
                 size_limit,
+                min_file_size: self.min_file_size,
+                max_file_size: self.max_file_size,
                 priority_function,
                 file_map: HashMap::new(),
                 access_count_map: HashMap::new()

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::usize;
 
 use cached_file::CachedFile;
 use sized_file::SizedFile;
@@ -12,6 +13,8 @@ use super::PriorityFunction;
 pub enum CacheInvalidationError {
     NoMoreFilesToRemove,
     NewPriorityIsNotHighEnough,
+    NewFileSmallerThanMin,
+    NewFileLargerThanMin
 }
 
 #[derive(Debug, PartialEq)]
@@ -32,6 +35,8 @@ pub enum CacheInvalidationSuccess {
 #[derive(Debug)]
 pub struct Cache {
     pub(crate) size_limit: usize, // The number of bytes the file_map should ever hold.
+    pub(crate) min_file_size: Option<usize>, // The minimum size file that can be added to the cache
+    pub(crate) max_file_size: Option<usize>, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
     pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
@@ -39,11 +44,13 @@ pub struct Cache {
 
 
 impl Cache {
-    //TODO, consider moving to the builder pattern if min and max file sizes are added as options.
     /// Creates a new Cache with the given size limit and the default priority function.
+    /// The min and max file sizes are not set.
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
+            min_file_size: None,
+            max_file_size: None,
             priority_function: Cache::DEFAULT_PRIORITY_FUNCTION,
             file_map: HashMap::new(),
             access_count_map: HashMap::new(),
@@ -58,6 +65,14 @@ impl Cache {
     /// for the new file.
     pub fn try_store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> Result<CacheInvalidationSuccess, CacheInvalidationError> {
         debug!("Possibly storing file: {:?} in the Cache.", path);
+
+        // Don't store the file if is too big or small.
+        if file.size > self.max_file_size.unwrap_or(usize::MAX) {
+            return Err(CacheInvalidationError::NewFileLargerThanMin)
+        }
+        if file.size < self.min_file_size.unwrap_or(0usize) {
+            return Err(CacheInvalidationError::NewFileSmallerThanMin)
+        }
 
         let required_space_for_new_file: isize = (self.size_bytes() as isize + file.size as isize) - self.size_limit as isize;
 
