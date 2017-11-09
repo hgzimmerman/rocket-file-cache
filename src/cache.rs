@@ -264,6 +264,12 @@ mod tests {
     use std::io::{Write, BufWriter};
     use std::fs::File;
 
+    use rocket::response::Response;
+    use rocket::response::NamedFile;
+    use std::io::BufReader;
+    use std::io::Read;
+
+
 
 
 
@@ -371,6 +377,56 @@ mod tests {
     const FILE_MEG5: &'static str = "meg5.txt";
     const FILE_MEG10: &'static str = "meg10.txt";
 
+
+    #[bench]
+    fn cache_get_10mb(b: &mut Bencher) {
+        let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+        cache.get_or_cache(path_10m.clone()); // add the 10 mb file to the cache
+
+        b.iter(|| {
+            let cached_file = cache.get_or_cache(path_10m.clone()).unwrap();
+            let mut response: Response = Response::new();
+            // Mimic what is done when the response body is set.
+            let file: *const SizedFile = Arc::into_raw(cached_file.file);
+            unsafe {
+                let f = (*file).bytes.clone();
+                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            }
+        });
+    }
+
+
+    #[bench]
+    fn cache_miss(b: &mut Bencher) {
+        let mut cache: Cache = Cache::new(MEG1); //Cache can hold 1Mb
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+
+        b.iter(|| {
+            let cached_file = cache.get_or_cache(path_10m.clone()).unwrap(); // Cache will not get the file
+            let mut response: Response = Response::new();
+            cached_file.set_response_body(&mut response);
+        });
+    }
+
+
+    #[bench]
+    fn named_file_read(b: &mut Bencher) {
+        let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+//        cache.get_or_cache(path_10m.clone()); // add the 10 mb file to the cache
+
+        b.iter(|| {
+            let mut named_file = NamedFile::open(path_10m.clone()).unwrap();
+//            let mut response: Response = Response::new();
+//            response.set_streamed_body(BufReader::new(named_file.take_file()));
+            let mut v :Vec<u8> = vec![];
+            named_file.read_to_end(&mut v);
+        });
+    }
 
     #[test]
     fn file_exceeds_size_limit() {
