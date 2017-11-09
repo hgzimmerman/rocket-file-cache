@@ -53,7 +53,7 @@ impl SizedFile {
 
 
 /// The structure that is returned when a request to the cache is made.
-/// The CachedFile knows its path, so it can set the content type when it is serialized to a request.
+/// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
 #[derive(Debug, Clone)]
 pub struct CachedFile {
     path: PathBuf,
@@ -470,12 +470,13 @@ mod tests {
 
     #[test]
     fn file_exceeds_size_limit() {
-        let mut cache: Cache = Cache::new(8000000); //Cache can hold only 8Mib
-        let path: PathBuf = PathBuf::from("test/".to_owned() + TEN_MEGS);
+        let mut cache: Cache = Cache::new(MEG1 * 8); //Cache can hold only 8Mb
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
         assert_eq!(
             cache.try_store(
-                path.clone(),
-                Arc::new(SizedFile::open(path.clone()).unwrap()),
+                path_10m.clone(),
+                Arc::new(SizedFile::open(path_10m.clone()).unwrap()),
             ),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         )
@@ -483,37 +484,41 @@ mod tests {
 
     #[test]
     fn file_replaces_other_file() {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+
+        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
+        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
+
+
         let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
-        let path_5: PathBuf = PathBuf::from("test/".to_owned() + FIVE_MEGS);
-        let path_1: PathBuf = PathBuf::from("test/".to_owned() + ONE_MEG);
         assert_eq!(
             cache.try_store(
-                path_5.clone(),
-                Arc::new(SizedFile::open(path_5.clone()).unwrap()),
+                path_5m.clone(),
+                Arc::new(SizedFile::open(path_5m.clone()).unwrap()),
             ),
             Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
         );
-        cache.increment_access_count(&path_1); // increment the access count, causing it to have a higher priority the next time it tries to be stored.
+        cache.increment_access_count(&path_1m); // increment the access count, causing it to have a higher priority the next time it tries to be stored.
         assert_eq!(
             cache.try_store(
-                path_1.clone(),
-                Arc::new(SizedFile::open(path_1.clone()).unwrap()),
+                path_1m.clone(),
+                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
             ),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         );
-        cache.increment_access_count(&path_1);
+        cache.increment_access_count(&path_1m);
         assert_eq!(
             cache.try_store(
-                path_1.clone(),
-                Arc::new(SizedFile::open(path_1.clone()).unwrap()),
+                path_1m.clone(),
+                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
             ),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         );
-        cache.increment_access_count(&path_1);
+        cache.increment_access_count(&path_1m);
         assert_eq!(
             cache.try_store(
-                path_1.clone(),
-                Arc::new(SizedFile::open(path_1.clone()).unwrap()),
+                path_1m.clone(),
+                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
             ),
             Ok(CacheInvalidationSuccess::ReplacedFile)
         );
