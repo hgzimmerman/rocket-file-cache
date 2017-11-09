@@ -58,6 +58,10 @@ pub struct Cache {
 impl Cache {
     /// Creates a new Cache with the given size limit and the default priority function.
     /// The min and max file sizes are not set.
+    ///
+    /// # Arguments
+    ///
+    /// * `size_limit` - The number of bytes that the Cache is allowed to hold at a given time.
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
@@ -75,6 +79,11 @@ impl Cache {
     /// If the provided file has more more access attempts than one of the files in the cache,
     /// but the cache is full, a file will have to be removed from the cache to make room
     /// for the new file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path of the file to be stored. Acts as a key for the file in the cache.
+    /// * `file` - A `Arc<SizedFile>` that will be attempted to be stored in the cache.
     pub fn try_store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> Result<CacheInvalidationSuccess, CacheInvalidationError> {
         debug!("Possibly storing file: {:?} in the Cache.", path);
 
@@ -105,7 +114,7 @@ impl Cache {
 
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
                 Ok(_) => {
-                    debug!("Made room in the cache for file and is now adding it");
+                    debug!("Made room in the cache for new file. Adding new file to cache.");
                     self.file_map.insert(path, file);
                     Ok(CacheInvalidationSuccess::ReplacedFile)
                 }
@@ -124,6 +133,12 @@ impl Cache {
     /// If this returns an Err, then either not enough space could be freed, or the priority of
     /// files that would need to be freed to make room for the new file is greater than the
     /// new file's priority, and as result no memory was freed.
+    ///
+    /// # Arguments
+    ///
+    /// * `required_space` - A `usize` representing the number of bytes that must be freed to make room for a new file.
+    /// * `new_file_priority` - A `usize` representing the priority of the new file to be added. If the priority of the files possibly being removed
+    /// is greater than this value, then the files won't be removed.
     fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<(), CacheInvalidationError> {
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
@@ -182,8 +197,13 @@ impl Cache {
         *count += 1; // Increment the access count
     }
 
-    /// Either gets the file from the cache, gets it from the filesystem and tries to cache it,
-    /// or fails to find the file and returns None.
+    /// Either gets the file from the cache if it exists there, gets it from the filesystem and
+    /// tries to cache it, or fails to find the file and returns None.
+    ///
+    /// # Arguments
+    ///
+    /// * `pathbuf` - A pathbuf that represents the path of the file in the fileserver. The pathbuf
+    /// also acts as a key for the file in the cache.
     pub fn get_or_cache(&mut self, pathbuf: PathBuf) -> Option<CachedFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
@@ -251,9 +271,6 @@ impl Cache {
     fn size_bytes(&self) -> usize {
         self.file_map.iter().fold(0usize, |size, x| size + x.1.size)
     }
-
-
-
 
 }
 
