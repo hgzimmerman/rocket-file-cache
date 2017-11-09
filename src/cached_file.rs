@@ -29,11 +29,17 @@ impl CachedFile {
         })
     }
 
-    pub fn set_response_body(self, response: &mut Response) {
+
+    /// The unsafe code required to set the body of a response is encapsulated in this method.
+    /// It converts the SizedFile into a raw pointer so its data can be used to set the streamed body
+    /// without explicit ownership.
+    /// This prevents copying the file, leading to a significant speedup.
+    #[inline]
+    pub(crate) fn set_response_body(self, response: &mut Response) {
         let file: *const SizedFile = Arc::into_raw(self.file);
         unsafe {
             response.set_streamed_body((*file).bytes.as_slice());
-            let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
         }
     }
 }
@@ -55,14 +61,6 @@ impl Responder<'static> for CachedFile {
             }
         }
 
-        // Convert the SizedFile into a raw pointer so its data can be used to set the streamed body
-        // without explicit ownership.
-        // This prevents copying the file, leading to a significant speedup.
-//        let file: *const SizedFile = Arc::into_raw(self.file);
-//        unsafe {
-//            response.set_streamed_body((*file).bytes.as_slice());
-//            let _ = Arc::from_raw(file); // Prevent dangling pointer?
-//        }
         self.set_response_body(&mut response);
 
         Ok(response)
