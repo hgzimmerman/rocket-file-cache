@@ -3,11 +3,13 @@ use super::PriorityFunction;
 
 use std::collections::HashMap;
 
+#[derive(Debug, PartialEq)]
 pub enum CacheBuildError {
     SizeLimitNotSet,
     MinFileSizeIsLargerThanMaxFileSize
 }
 
+#[derive(Debug)]
 pub struct CacheBuilder {
     size_limit: Option<usize>,
     priority_function: Option<PriorityFunction>,
@@ -28,8 +30,9 @@ impl CacheBuilder {
 
     /// Mandatory parameter, must be set.
     /// Sets the maximum number of bytes the cache can hold.
-    pub fn size_limit_bytes(&mut self, size_limit_bytes: usize) {
+    pub fn size_limit_bytes<'a>(&'a mut self, size_limit_bytes: usize) -> &mut Self {
         self.size_limit = Some(size_limit_bytes);
+        self
     }
 
     /// Override the default priority function used for determining if the cache should hold a file.
@@ -42,13 +45,22 @@ impl CacheBuilder {
     ///
     /// The priority function should be kept simple, as it is calculated on every file in the cache
     /// every time a new file is attempted to be added.
-    pub fn priority_function(&mut self, priority_function: PriorityFunction) {
+    pub fn priority_function<'a>(&'a mut self, priority_function: PriorityFunction) -> &mut Self {
         self.priority_function = Some(priority_function);
+        self
     }
 
-    // TODO, implement min and max file sizes
+    pub fn min_file_size<'a>(&'a mut self, min_size: usize) -> &mut Self {
+        self.min_file_size = Some(min_size);
+        self
+    }
 
-    pub fn build(self) -> Result<Cache, CacheBuildError> {
+    pub fn max_file_size<'a>(&'a mut self, max_size: usize) -> &mut Self {
+        self.max_file_size = Some(max_size);
+        self
+    }
+
+    pub fn build(&self) -> Result<Cache, CacheBuildError> {
         let size_limit = match self.size_limit {
             Some(s) => s,
             None => return Err(CacheBuildError::SizeLimitNotSet)
@@ -77,4 +89,38 @@ impl CacheBuilder {
         )
 
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_size_error(){
+        assert_eq!(CacheBuildError::SizeLimitNotSet, CacheBuilder::new().build().unwrap_err());
+    }
+    #[test]
+    fn min_greater_than_max() {
+
+        let e: CacheBuildError = CacheBuilder::new()
+            .size_limit_bytes(1024 * 1024 * 10)
+            .min_file_size(1024 * 1024 * 5)
+            .max_file_size(1024 * 1024 * 4)
+            .build()
+            .unwrap_err();
+        assert_eq!(CacheBuildError::MinFileSizeIsLargerThanMaxFileSize, e);
+    }
+
+    #[test]
+    fn can_build() {
+        let _: Cache = CacheBuilder::new()
+            .size_limit_bytes(1024 * 1024 * 20)
+            .priority_function(|access_count: usize, size: usize| {
+                access_count * size
+            })
+            .max_file_size(1024 * 1024 * 10)
+            .min_file_size(1024 * 10)
+            .build().unwrap();
+    }
+
 }
