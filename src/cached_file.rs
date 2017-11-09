@@ -4,7 +4,7 @@ use rocket::request::Request;
 
 use std::result;
 use std::sync::Arc;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::io;
 
 use sized_file::SizedFile;

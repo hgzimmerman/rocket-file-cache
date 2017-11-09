@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -352,12 +352,25 @@ mod tests {
 
     // Comparison test
     //    #[bench]
-    fn clone5mib(b: &mut Bencher) {
-        let mut megs2: Box<[u8; 5000000]> = Box::new([0u8; 5000000]);
-        StdRng::new().unwrap().fill_bytes(megs2.as_mut());
+//    fn clone5mib(b: &mut Bencher) {
+//        let mut megs2: Box<[u8; 5000000]> = Box::new([0u8; 5000000]);
+//        StdRng::new().unwrap().fill_bytes(megs2.as_mut());
+//
+//        b.iter(|| megs2.clone());
+//    }
 
-        b.iter(|| megs2.clone());
-    }
+
+    const MEG1: usize = 1024 * 1024;
+    const MEG2: usize = MEG1 * 2;
+    const MEG5: usize = MEG1 * 5;
+    const MEG10: usize = MEG1 * 10;
+
+    const DIR_TEST: &'static str = "test1";
+    const FILE_MEG1: &'static str = "meg1.txt";
+    const FILE_MEG2: &'static str = "meg2.txt";
+    const FILE_MEG5: &'static str = "meg5.txt";
+    const FILE_MEG10: &'static str = "meg10.txt";
+
 
     #[test]
     fn file_exceeds_size_limit() {
@@ -415,18 +428,7 @@ mod tests {
         );
     }
 
-    const MEG1: usize = 1024 * 1024;
-    const MEG2: usize = MEG1 * 2;
-    const MEG3: usize = MEG1 * 3;
-    const MEG5: usize = MEG1 * 5;
-    const MEG10: usize = MEG1 * 10;
 
-    const DIR_TEST: &'static str = "test1";
-    const FILE_MEG1: &'static str = "meg1.txt";
-    const FILE_MEG2: &'static str = "meg2.txt";
-    const FILE_MEG3: &'static str = "meg3.txt";
-    const FILE_MEG5: &'static str = "meg5.txt";
-    const FILE_MEG10: &'static str = "meg10.txt";
 
     // Helper function that creates test files in a directory that is cleaned up after the test runs.
     fn create_test_file(temp_dir: &TempDir, size: usize, name: &str) -> PathBuf {

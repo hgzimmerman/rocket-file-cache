@@ -4,18 +4,6 @@ extern crate rocket;
 extern crate log;
 
 
-
-use std::collections::HashMap;
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::io::BufReader;
-use std::io::Read;
-use std::io;
-use std::result;
-use std::usize;
-use std::fmt;
-use std::sync::Arc;
-
 pub mod cache;
 mod sized_file;
 pub mod cached_file;
