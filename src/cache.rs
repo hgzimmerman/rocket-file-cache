@@ -14,7 +14,8 @@ pub enum CacheInvalidationError {
     NoMoreFilesToRemove,
     NewPriorityIsNotHighEnough,
     NewFileSmallerThanMin,
-    NewFileLargerThanMin
+    NewFileLargerThanMax,
+    NewFileLargerThanCache
 }
 
 #[derive(Debug, PartialEq)]
@@ -68,10 +69,13 @@ impl Cache {
 
         // Don't store the file if is too big or small.
         if file.size > self.max_file_size.unwrap_or(usize::MAX) {
-            return Err(CacheInvalidationError::NewFileLargerThanMin)
+            return Err(CacheInvalidationError::NewFileLargerThanMax)
         }
         if file.size < self.min_file_size.unwrap_or(0usize) {
             return Err(CacheInvalidationError::NewFileSmallerThanMin)
+        }
+        if file.size > self.size_limit {
+            return Err(CacheInvalidationError::NewFileLargerThanCache)
         }
 
         let required_space_for_new_file: isize = (self.size_bytes() as isize + file.size as isize) - self.size_limit as isize;
@@ -94,9 +98,9 @@ impl Cache {
                     self.file_map.insert(path, file);
                     Ok(CacheInvalidationSuccess::ReplacedFile)
                 }
-                Err(_) => {
+                Err(e) => {
                     debug!("The file does not have enough priority or is too large to be accepted into the cache.");
-                    return Err(CacheInvalidationError::NewPriorityIsNotHighEnough);
+                    return Err(e);
 
                 }
             }
@@ -109,7 +113,7 @@ impl Cache {
     /// If this returns an Err, then either not enough space could be freed, or the priority of
     /// files that would need to be freed to make room for the new file is greater than the
     /// new file's priority, and as result no memory was freed.
-    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<(), String> {
+    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<(), CacheInvalidationError> {
         // TODO come up with a better result type.
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
@@ -130,12 +134,10 @@ impl Cache {
                     // If it is, then don't free the files, as they in aggregate, are more important
                     // than the new file.
                     if priority_score_to_free > new_file_priority {
-                        return Err(String::from(
-                            "Priority of new file isn't higher than the aggregate priority of the file(s) it would replace",
-                        ));
+                        return Err( CacheInvalidationError::NewPriorityIsNotHighEnough)
                     }
                 }
-                None => return Err(String::from("No more files to remove")),
+                None => return Err( CacheInvalidationError::NoMoreFilesToRemove),
             };
         }
 
@@ -415,7 +417,7 @@ mod tests {
 
     #[test]
     fn file_exceeds_size_limit() {
-        let mut cache: Cache = Cache::new(MEG1 * 8); //Cache can hold only 8Mb
+        let mut cache: Cache = Cache::new(MEG1 * 8); // Cache can hold only 8Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
         assert_eq!(
@@ -423,7 +425,7 @@ mod tests {
                 path_10m.clone(),
                 Arc::new(SizedFile::open(path_10m.clone()).unwrap()),
             ),
-            Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
+            Err(CacheInvalidationError::NewFileLargerThanCache)
         )
     }
 
