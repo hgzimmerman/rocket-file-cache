@@ -118,8 +118,8 @@ pub enum CacheInvalidationSuccess {
 /// If the number of access attempts for the file are higher than the least in demand file in the Cache, the cache will replace the low demand file with the high demand file.
 #[derive(Debug)]
 pub struct Cache {
-    size_limit: usize, // Currently this is being used as the number of elements in the cache, but should be used as the number of bytes in the hashmap.
-    priority_function: PriorityFunction,
+    size_limit: usize, // The number of bytes the file_map should ever hold.
+    priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
     access_count_map: HashMap<PathBuf, usize> // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
@@ -127,14 +127,22 @@ pub struct Cache {
 
 impl Cache {
 
-    /// Creates a new Cache with the given size limit.
-    /// Currently the size_limit is representative of the number of files stored in the Cache, but
-    /// plans exist to make size limit represent the maximum number of bytes the Cache's file_map
-    /// can hold.
+    //TODO, consider moving to the builder pattern if min and max file sizes are added as options.
+    /// Creates a new Cache with the given size limit and the default priority function.
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
             priority_function: Cache::DEFAULT_PRIORITY_FUNCTION,
+            file_map: HashMap::new(),
+            access_count_map: HashMap::new()
+        }
+    }
+
+    /// Creates a new Cache with the given size limit and a specified priority function.
+    pub fn new_with_priority_function(size_limit: usize, priority_function: PriorityFunction) -> Cache {
+        Cache {
+            size_limit,
+            priority_function,
             file_map: HashMap::new(),
             access_count_map: HashMap::new()
         }
@@ -271,6 +279,7 @@ impl Cache {
             Some(cached_file)
         } else {
             // Indicate that the file was not found in either the filesystem or cache.
+            // This None is interpreted by Rocket by default to forward the request to its 404 handler.
             None
         }
     }
@@ -495,13 +504,14 @@ mod tests {
     const FILE_MEG5: &'static str = "meg5.txt";
     const FILE_MEG10: &'static str = "meg10.txt";
 
+    // Helper function that creates test files in a directory that is cleaned up after the test runs.
     fn create_test_file(temp_dir: &TempDir, size: usize, name: &str ) -> PathBuf {
         let path = temp_dir.path().join(name);
-        let mut tmp_file = File::create(path.clone()).unwrap();
+        let tmp_file = File::create(path.clone()).unwrap();
         let mut rand_data: Vec<u8> = vec![0u8; size];
         StdRng::new().unwrap().fill_bytes(rand_data.as_mut());
         let mut buffer = BufWriter::new(tmp_file);
-        buffer.write(&rand_data);
+        buffer.write(&rand_data).unwrap();
         path
     }
 
@@ -510,17 +520,23 @@ mod tests {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
         let path_2m = create_test_file(&temp_dir, MEG2, FILE_MEG2);
-        let path_3m = create_test_file(&temp_dir, MEG3, FILE_MEG3);
+//        let path_3m = create_test_file(&temp_dir, MEG3, FILE_MEG3);
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
-        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+//        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
 
         cache.increment_access_count(&path_5m);
-        cache.try_store(path_5m.clone(), Arc::new(SizedFile::open(path_5m.clone()).unwrap()));
+        assert_eq!(
+            cache.try_store(path_5m.clone(), Arc::new(SizedFile::open(path_5m.clone()).unwrap())),
+            Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
+        );
 
         cache.increment_access_count(&path_2m);
-        cache.try_store(path_2m.clone(), Arc::new(SizedFile::open(path_2m.clone()).unwrap()));
+        assert_eq!(
+            cache.try_store(path_2m.clone(), Arc::new(SizedFile::open(path_2m.clone()).unwrap())),
+            Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
+        );
 
         // The cache will not accept the 1 meg file because sqrt(2)_size * 1_access is greater than sqrt(1)_size * 1_access
         cache.increment_access_count(&path_1m);
@@ -544,7 +560,8 @@ mod tests {
         // Get directly from the cache, no FS involved.
         if let None = cache.get(&path_5m) {
             assert_eq!(&path_5m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
-            // If this has failed, the cache removed the wrong file. It should remove the 2m file instead
+            // If this has failed, the cache removed the wrong file, implying the ordering of
+            // priorities is wrong. It should remove the path_2m file instead.
         }
 
         if let Some(_) = cache.get(&path_2m) {
