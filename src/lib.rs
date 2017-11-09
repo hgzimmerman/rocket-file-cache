@@ -7,7 +7,6 @@ extern crate rocket;
 
 #[macro_use]
 extern crate log;
-extern crate rand;
 
 use rocket::request::Request;
 use rocket::response::{Response, Responder};
@@ -214,8 +213,8 @@ impl Cache {
         }
 
         // If this hasn't returned early, then the files to remove are less important than the new file.
-        for file in file_paths_to_remove {
-            self.file_map.remove(&file);
+        for file_key in file_paths_to_remove {
+            self.file_map.remove(&file_key);
         }
         return Ok(());
     }
@@ -276,9 +275,6 @@ impl Cache {
         }
     }
 
-    // TODO this is a pretty operation that is called multiple times, it may make sense to use an
-    // alternative datastructure for holding priorities persistently, or just return the whole vector
-    // and index into that to remove the need of calling this multiple times.
     /// Gets a tuple containing the Path, priority score, and size in bytes of the entry in
     /// the file_map with the lowest priority score.
     fn sorted_priorities(&self) -> Vec<(PathBuf,usize,usize)> {
@@ -292,9 +288,11 @@ impl Cache {
             (file_key.clone(), priority, size)
         }).collect();
 
-        priorities.sort_by(|l,r| l.1.cmp(&r.1)); // sort by priority
-//        println!("Priorities: {:?}", priorities);
-        priorities // TODO, verify that the list is sorted correctly so the index is extracting the LOWEST priority
+        // Sort the priorities from highest priority to lowest, so when they are pop()ed later,
+        // the last element will have the lowest priority.
+        priorities.sort_by(|l,r| r.1.cmp(&l.1)); // sort by priority
+//        println!("{:?}",priorities);
+        priorities
     }
 
 
@@ -337,6 +335,11 @@ pub type PriorityFunction = fn(usize, usize) -> usize;
 #[cfg(test)]
 mod tests {
     extern crate test;
+    extern crate tempdir;
+    extern crate rand;
+
+    use self::tempdir::TempDir;
+
     use super::*;
 
     use std::sync::Mutex;
@@ -345,8 +348,12 @@ mod tests {
     use self::test::Bencher;
     use rocket::response::NamedFile;
     use rocket::State;
+    use self::rand::{StdRng, Rng};
+    use std::io::{Write, BufWriter};
 
-//    #[get("/<path..>", rank=4)]
+
+
+    //    #[get("/<path..>", rank=4)]
 //    fn cache_files(path: PathBuf, cache: State<Mutex<Cache>>) -> Option<CachedFile> {
 //        let pathbuf: PathBuf = Path::new("test").join(path.clone()).to_owned();
 //        cache.lock().unwrap().get_or_cache(pathbuf)
@@ -434,7 +441,6 @@ mod tests {
     // Comparison test
 //    #[bench]
     fn clone5mib(b: &mut Bencher) {
-        use rand::{StdRng, Rng};
         let mut megs2: Box<[u8; 5000000]> = Box::new([0u8; 5000000]);
         StdRng::new().unwrap().fill_bytes(megs2.as_mut());
 
@@ -474,5 +480,75 @@ mod tests {
             cache.try_store(path_1.clone(), Arc::new(SizedFile::open(path_1.clone()).unwrap())),
             Ok(CacheInvalidationSuccess::ReplacedFile)
         );
+    }
+
+    const MEG1: usize = 1024 * 1024;
+    const MEG2: usize = MEG1 * 2;
+    const MEG3: usize = MEG1 * 3;
+    const MEG5: usize = MEG1 * 5;
+    const MEG10: usize = MEG1 * 10;
+
+    const DIR_TEST: &'static str = "test1";
+    const FILE_MEG1: &'static str = "meg1.txt";
+    const FILE_MEG2: &'static str = "meg2.txt";
+    const FILE_MEG3: &'static str = "meg3.txt";
+    const FILE_MEG5: &'static str = "meg5.txt";
+    const FILE_MEG10: &'static str = "meg10.txt";
+
+    fn create_test_file(temp_dir: &TempDir, size: usize, name: &str ) -> PathBuf {
+        let path = temp_dir.path().join(name);
+        let mut tmp_file = File::create(path.clone()).unwrap();
+        let mut rand_data: Vec<u8> = vec![0u8; size];
+        StdRng::new().unwrap().fill_bytes(rand_data.as_mut());
+        let mut buffer = BufWriter::new(tmp_file);
+        buffer.write(&rand_data);
+        path
+    }
+
+    #[test]
+    fn new_file_replaces_lowest_priority_file() {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
+        let path_2m = create_test_file(&temp_dir, MEG2, FILE_MEG2);
+        let path_3m = create_test_file(&temp_dir, MEG3, FILE_MEG3);
+        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+
+        let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
+
+        cache.increment_access_count(&path_5m);
+        cache.try_store(path_5m.clone(), Arc::new(SizedFile::open(path_5m.clone()).unwrap()));
+
+        cache.increment_access_count(&path_2m);
+        cache.try_store(path_2m.clone(), Arc::new(SizedFile::open(path_2m.clone()).unwrap()));
+
+        // The cache will not accept the 1 meg file because sqrt(2)_size * 1_access is greater than sqrt(1)_size * 1_access
+        cache.increment_access_count(&path_1m);
+        assert_eq!(
+            cache.try_store(path_1m.clone(), Arc::new(SizedFile::open(path_1m.clone()).unwrap())),
+            Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
+        );
+
+        // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
+        // file is less than (sqrt(1)_size * 2_access) for the new file.
+        cache.increment_access_count(&path_1m);
+        assert_eq!(
+            cache.try_store(path_1m.clone(), Arc::new(SizedFile::open(path_1m.clone()).unwrap())),
+            Ok(CacheInvalidationSuccess::ReplacedFile)
+        );
+
+        if let None = cache.get(&path_1m) {
+            assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+        }
+
+        // Get directly from the cache, no FS involved.
+        if let None = cache.get(&path_5m) {
+            assert_eq!(&path_5m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+            // If this has failed, the cache removed the wrong file. It should remove the 2m file instead
+        }
+
+        if let Some(_) = cache.get(&path_2m) {
+            assert_eq!(&path_2m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+        }
     }
 }
