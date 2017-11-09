@@ -179,11 +179,12 @@ impl Cache {
     }
 
     /// Remove the n lowest priority files to make room for a file with a size: required_space.
+    ///
+    /// If this returns an OK, this function has removed the required file space from the file_map.
     fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> result::Result<(), String> { // TODO come up with a better result type.
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec!();
-        //let mut lowest_file_index: usize = 0; // we need an index into the n lowest priority files.
 
         let mut priorities: Vec<(PathBuf,usize,usize)> = self.sorted_priorities();
         while possibly_freed_space < required_space {
@@ -200,43 +201,14 @@ impl Cache {
                     // If it is, then don't free the files, as they in aggregate, are more important
                     // than the new file.
                     if priority_score_to_free > new_file_priority {
-                        return Err(String::from("Priority isn't high enough"))
+                        return Err(String::from("Priority of new file isn't higher than the aggregate priority of the file(s) it would replace"))
                     }
                 },
                 None => {
-                    return Err(String::from("no more files to remove"))
+                    return Err(String::from("No more files to remove"))
                 }
             };
         }
-
-
-        // Loop until the more bytes can freed than the number of bytes that are required.
-//        while possibly_freed_space < required_space {
-//            match self.lowest_priority_in_file_map(lowest_file_index) {
-//                Some(lowest) => {
-//                    let (lowest_key, lowest_file_priority, lowest_file_size) = lowest;
-//
-//                    possibly_freed_space += lowest_file_size;
-//                    priority_score_to_free += lowest_file_priority;
-//                    file_paths_to_remove.push(lowest_key.clone());
-//
-//                    // Check if total priority to free is greater than the new file's priority,
-//                    // If it is, then don't free the files, as they in aggregate, are more important
-//                    // than the new file.
-//                    if priority_score_to_free > new_file_priority {
-//                        return Err(String::from("Priority isn't high enough"))
-//                    }
-//
-//                }
-//                None => {
-//                    return Err(String::from("No more files to remove.")); // There arent any more files to store OR the file to store is too big TODO catch this edge case
-//                }
-//            }
-//
-//            // Increment the lowest file index, so the next time lowest_priority_in_file_map() runs,
-//            // It will access the file with the next lowest priority.
-//            lowest_file_index += 1;
-//        }
 
         // If this hasn't returned early, then the files to remove are less important than the new file.
         for file in file_paths_to_remove {
