@@ -1,6 +1,6 @@
 [package]
 name = "rocket-file-cache"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Henry Zimmerman <zimhen7@gmail.com>"]
 exclude = [
     "test/*",
