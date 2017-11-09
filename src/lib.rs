@@ -1,10 +1,5 @@
-//#![feature(plugin)]
-//#![plugin(rocket_codegen)]
 #![feature(test)]
-
 extern crate rocket;
-
-
 #[macro_use]
 extern crate log;
 
@@ -25,7 +20,8 @@ use std::fmt;
 use std::sync::Arc;
 
 /// The structure that represents a file in memory.
-/// Keeps a copy of the size of the file.
+/// Keeps a copy of the size of the file so the size can be used in calculating if it should be
+/// removed from the cache.
 #[derive(Clone)]
 pub struct SizedFile {
     bytes: Vec<u8>,
@@ -64,14 +60,23 @@ pub struct CachedFile {
     file: Arc<SizedFile>,
 }
 
+impl CachedFile {
+    /// Reads the file at the path into a CachedFile.
+    pub fn open(path: PathBuf) -> io::Result<CachedFile> {
+        let sized_file: SizedFile = SizedFile::open(&path)?;
+        Ok(CachedFile {
+            path,
+            file: Arc::new(sized_file)
+        })
+    }
+}
 
 
-/// Streams the named file to the client. Sets or overrides the Content-Type in
-/// the response according to the file's extension if the extension is
-/// recognized. See
-/// [ContentType::from_extension](/rocket/http/struct.ContentType.html#method.from_extension)
-/// for more information. If you would like to stream a file with a different
-/// Content-Type than that implied by its extension, use a `File` directly.
+/// Streams the cached file to the client. Sets or overrides the Content-Type in
+/// the response according to the file's extension if the extension is recognized.
+///
+/// If you would like to stream a file with a different Content-Type than that implied by its
+/// extension, convert the `CachedFile` to a `File`, and respond with that instead.
 ///
 /// Based on NamedFile from rocket::response::NamedFile
 impl Responder<'static> for CachedFile {
@@ -266,6 +271,7 @@ impl Cache {
         debug!("Cache missed for file: {:?}", pathbuf);
         // Instead the file needs to read from the filesystem.
         if let Ok(file) = SizedFile::open(pathbuf.as_path()) {
+            // TODO, consider moving the increment count into try_store()
             self.increment_access_count(&pathbuf); // Because the file exists, but is not in the cache, increment the access count
             // If the file was read, convert it to a cached file and attempt to store it in the cache
             let arc_file: Arc<SizedFile> = Arc::new(file);
@@ -309,8 +315,7 @@ impl Cache {
 
         // Sort the priorities from highest priority to lowest, so when they are pop()ed later,
         // the last element will have the lowest priority.
-        priorities.sort_by(|l, r| r.1.cmp(&l.1)); // sort by priority
-        //        println!("{:?}",priorities);
+        priorities.sort_by(|l, r| r.1.cmp(&l.1));
         priorities
     }
 
