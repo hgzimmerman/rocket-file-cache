@@ -2,6 +2,8 @@ use cache::Cache;
 
 use std::collections::HashMap;
 use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
+use std::usize;
+
 
 #[derive(Debug, PartialEq)]
 pub enum CacheBuildError {
@@ -79,11 +81,21 @@ impl CacheBuilder {
             }
         }
 
+        let min_file_size: usize = match self.min_file_size {
+            Some(min) => min,
+            None => 0
+        };
+
+        let max_file_size: usize = match self.max_file_size {
+            Some(max) => max,
+            None => usize::MAX
+        };
+
         Ok(
             Cache {
                 size_limit,
-                min_file_size: self.min_file_size,
-                max_file_size: self.max_file_size,
+                min_file_size,
+                max_file_size,
                 priority_function,
                 file_map: HashMap::new(),
                 access_count_map: HashMap::new()

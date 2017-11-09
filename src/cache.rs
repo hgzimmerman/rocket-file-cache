@@ -36,8 +36,8 @@ pub enum CacheInvalidationSuccess {
 #[derive(Debug)]
 pub struct Cache {
     pub(crate) size_limit: usize, // The number of bytes the file_map should ever hold.
-    pub(crate) min_file_size: Option<usize>, // The minimum size file that can be added to the cache
-    pub(crate) max_file_size: Option<usize>, // The maximum size file that can be added to the cache
+    pub(crate) min_file_size: usize, // The minimum size file that can be added to the cache
+    pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
     pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
@@ -50,8 +50,8 @@ impl Cache {
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
-            min_file_size: None,
-            max_file_size: None,
+            min_file_size: 0,
+            max_file_size: usize::MAX,
             priority_function: DEFAULT_PRIORITY_FUNCTION,
             file_map: HashMap::new(),
             access_count_map: HashMap::new(),
@@ -68,10 +68,10 @@ impl Cache {
         debug!("Possibly storing file: {:?} in the Cache.", path);
 
         // Don't store the file if is too big or small.
-        if file.size > self.max_file_size.unwrap_or(usize::MAX) {
+        if file.size > self.max_file_size {
             return Err(CacheInvalidationError::NewFileLargerThanMax)
         }
-        if file.size < self.min_file_size.unwrap_or(0usize) {
+        if file.size < self.min_file_size {
             return Err(CacheInvalidationError::NewFileSmallerThanMin)
         }
         if file.size > self.size_limit {
@@ -114,7 +114,6 @@ impl Cache {
     /// files that would need to be freed to make room for the new file is greater than the
     /// new file's priority, and as result no memory was freed.
     fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<(), CacheInvalidationError> {
-        // TODO come up with a better result type.
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec![];
@@ -188,8 +187,8 @@ impl Cache {
         debug!("Cache missed for file: {:?}", pathbuf);
         // Instead the file needs to read from the filesystem.
         if let Ok(file) = SizedFile::open(pathbuf.as_path()) {
-            // TODO, consider moving the increment count into try_store()
-            self.increment_access_count(&pathbuf); // Because the file exists, but is not in the cache, increment the access count
+            // Because the file exists, but is not in the cache, increment the access count.
+            self.increment_access_count(&pathbuf);
             // If the file was read, convert it to a cached file and attempt to store it in the cache
             let arc_file: Arc<SizedFile> = Arc::new(file);
             let cached_file: CachedFile = CachedFile {
