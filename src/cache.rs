@@ -29,10 +29,21 @@ pub enum CacheInvalidationSuccess {
 /// The Cache holds a number of files whose bytes fit into its size_limit.
 /// The Cache acts as a proxy to the filesystem.
 /// When a request for a file is made, the Cache checks to see if it has a copy of the file.
-/// If it does have a copy, it returns the copy.
-/// If it doesn't have a copy, it reads the file from the FS and tries to cache it.
-/// If there is room in the Cache, the cache will store the file, otherwise it will increment a count indicating the number of access attempts for the file.
-/// If the number of access attempts for the file are higher than the least in demand file in the Cache, the cache will replace the low demand file with the high demand file.
+/// If it does have a file, it returns an Arc reference to the file in a format that can easily be serialized.
+/// If it doesn't own a copy of the file, it reads the file from the FS and tries to cache it.
+/// If there is room in the Cache, the cache will store the file, otherwise it will increment a
+/// count indicating the number of access attempts for the file.
+///
+/// When the cache is full, each file in the cache will have priority score determined by the priority function.
+/// When a a new file is attempted to be stored, it will calculate the priority of the new score and
+/// compare that against the score of the file with the lowest priority in the cache.
+/// If the new file's priority is higher, then the file in the cache will be removed and replaced with the new file.
+/// If removing the first file doesn't free up enough space for the new file, then the file with the
+/// next lowest priority will have its priority added to the other removed file's and the aggregate
+/// cached file's priority will be tested against the new file's.
+/// This will repeat until either enough space can be freed for the new file, and the new file is
+/// inserted, or until the priority of the cached files is greater than that of the new file,
+/// in which case, the new file isn't inserted.
 #[derive(Debug)]
 pub struct Cache {
     pub(crate) size_limit: usize, // The number of bytes the file_map should ever hold.
