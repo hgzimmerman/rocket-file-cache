@@ -98,7 +98,8 @@ impl CacheBuilder {
                 max_file_size,
                 priority_function,
                 file_map: HashMap::new(),
-                count_and_priority_map: HashMap::new()
+                file_stats_map: HashMap::new(),
+                access_count_map: HashMap::new()
             }
         )
 

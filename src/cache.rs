@@ -30,7 +30,14 @@ pub struct AccessCountAndPriority {
     priority_score: usize
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct FileStats {
+    size: usize,
+    access_count: usize,
+    priority: usize
+}
 
+// Todo Try adding another hashmap that maps a pathbuf to a struct with the size, priority and access count of only files in the file_map.
 /// The Cache holds a number of files whose bytes fit into its size_limit.
 /// The Cache acts as a proxy to the filesystem.
 /// When a request for a file is made, the Cache checks to see if it has a copy of the file.
@@ -57,7 +64,8 @@ pub struct Cache {
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
-    pub(crate) count_and_priority_map: HashMap<PathBuf, AccessCountAndPriority>, // Every file that is accessed will have the number of times it is accessed logged in this map.
+    pub(crate) file_stats_map: HashMap<PathBuf, FileStats>, // TODO this will hold stats for only the files in the file map.
+    pub(crate) access_count_map: HashMap<PathBuf, usize>, // TODO make this go back to just access count // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
 
@@ -76,7 +84,8 @@ impl Cache {
             max_file_size: usize::MAX,
             priority_function: DEFAULT_PRIORITY_FUNCTION,
             file_map: HashMap::new(),
-            count_and_priority_map: HashMap::new(),
+            file_stats_map: HashMap::new(),
+            access_count_map: HashMap::new(),
         }
     }
 
@@ -116,17 +125,15 @@ impl Cache {
         if required_space_for_new_file < 0 {
             debug!("Cache has room for the file.");
             self.file_map.insert(path.clone(), file);
-            self.update_priority_score(&path);
+            self.update_stats(&path);
             Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
         } else {
-            // Otherwise, the cache will have to try to make some room for the new file
+            debug!("Trying to make room for the file");
 
             // The access_count should have incremented since the last time this was called, so the priority must be recalculated.
             // Also, the size generally
-            let new_file_access_count: usize = match self.count_and_priority_map.get(&path) {
-                Some(count_and_priority) => count_and_priority.access_count,
-                None => 1,
-            };
+            let new_file_access_count: usize = self.access_count_map.get(&path).unwrap_or(&1).clone();
+
             let new_file_priority: usize = (self.priority_function)(new_file_access_count, file.size);
 
 
@@ -134,7 +141,7 @@ impl Cache {
                 Ok(_) => {
                     debug!("Made room in the cache for new file. Adding new file to cache.");
                     self.file_map.insert(path.clone(), file);
-                    self.update_priority_score(&path);
+                    self.update_stats(&path);
                     Ok(CacheInvalidationSuccess::ReplacedFile)
                 }
                 Err(e) => {
@@ -163,15 +170,15 @@ impl Cache {
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec![];
 
-        let mut priorities: Vec<(PathBuf, usize, usize)> = self.sorted_priorities();
+        let mut stats: Vec<(PathBuf, FileStats)> = self.sorted_priorities();
         while possibly_freed_space < required_space {
             // pop the priority group with the lowest priority off of the vector
-            match priorities.pop() {
+            match stats.pop() {
                 Some(lowest) => {
-                    let (lowest_key, lowest_file_priority, lowest_file_size) = lowest;
+                    let (lowest_key, lowest_stats) = lowest;
 
-                    possibly_freed_space += lowest_file_size;
-                    priority_score_to_free += lowest_file_priority;
+                    possibly_freed_space += lowest_stats.size;
+                    priority_score_to_free += lowest_stats.priority;
                     file_paths_to_remove.push(lowest_key.clone());
 
                     // Check if total priority to free is greater than the new file's priority,
@@ -210,38 +217,32 @@ impl Cache {
     ///
     /// This should only be used in cases where the file is known to exist, to avoid bloating the access count map with useless values.
     fn increment_access_count(&mut self, path: &PathBuf) {
-        let count_and_priority: &mut AccessCountAndPriority = self.count_and_priority_map.entry(path.to_path_buf()).or_insert(
+        let access_count: &mut usize = self.access_count_map.entry(path.to_path_buf()).or_insert(
             // By default, the count and priority will be 0.
             // The count will immediately be incremented, and the score can't be calculated without the size of the file in question.
             // Therefore, files not in the cache MUST have their priority score calculated on insertion attempt.
-            AccessCountAndPriority {
-                access_count: 0,
-                priority_score: 0
-            },
+            0usize
         );
-        count_and_priority.access_count += 1; // Increment the access count
+        *access_count += 1; // Increment the access count
     }
 
 
-    fn update_priority_score(&mut self, path: &PathBuf) {
-        let file_size: usize = match self.get_from_cache(path){
-            Some(cached_file) => cached_file.file.size,
-            None => {
-                0
-            }
+    fn update_stats(&mut self, path: &PathBuf) {
+        let size: usize = match self.file_map.get(path){
+            Some(sized_file) => sized_file.size,
+            None => 0
         };
 
-        let count_and_priority: &mut AccessCountAndPriority = self.count_and_priority_map.entry(path.to_path_buf()).or_insert(
-            // By default, the count and priority will be 0.
-            // The count will immediately be incremented, and the score can't be calculated without the size of the file in question.
-            // Therefore, files not in the cache MUST have their priority score calculated on insertion attempt.
-            AccessCountAndPriority {
-                access_count: 0,
-                priority_score: 0
-            },
-        );
+        let access_count: usize = self.access_count_map.get(path).unwrap_or(&1).clone();
 
-        count_and_priority.priority_score = (self.priority_function)(count_and_priority.access_count, file_size); // update the priority score.
+        let stats: &mut FileStats = self.file_stats_map.entry(path.to_path_buf()).or_insert(
+            FileStats {
+                size,
+                access_count,
+                priority: 0
+            }
+        );
+        stats.priority = (self.priority_function)(stats.access_count, stats.size); // update the priority score.
     }
 
     /// Either gets the file from the cache if it exists there, gets it from the filesystem and
@@ -258,17 +259,28 @@ impl Cache {
             if let Some(cache_file) = self.get_from_cache(&pathbuf) {
                 debug!("Cache hit for file: {:?}", pathbuf);
                 self.increment_access_count(&pathbuf); // File is in the cache, increment the count
-                self.update_priority_score(&pathbuf);
+                self.update_stats(&pathbuf);
                 return Some(cache_file);
             }
         }
 
+        // TODO:----------------------
+        // Reading a sized file is where all the performance is lost when there is a cache miss,
+        // a sized file requires copying all bytes into the structure in the file, and then this is read again later
+        // effectively causing the whole file to be read twice.
+        //
+        // It would be nice if the sized file could be either a wrapped file handle if it is being returned as
+        // a cache miss, or as a vector of bytes if it is going to be stored in the cache.
+        //
+        // Possibly have the "CachedFile" type own an Either<SizedFile, File> that is returned when
+        // A cache request is made. The Cache itself would store only SizedFiles.
         debug!("Cache missed for file: {:?}", pathbuf);
         // Instead the file needs to read from the filesystem.
         if let Ok(file) = SizedFile::open(pathbuf.as_path()) {
             // Because the file exists, but is not in the cache, increment the access count.
             self.increment_access_count(&pathbuf);
             // If the file was read, convert it to a cached file and attempt to store it in the cache
+
             let arc_file: Arc<SizedFile> = Arc::new(file);
             let cached_file: CachedFile = CachedFile {
                 path: pathbuf.clone(),
@@ -276,6 +288,7 @@ impl Cache {
             };
 
             // possibly stores the cached file in the store.
+            // Storing is a pretty cheap operation
             let _ = self.try_store(pathbuf.clone(), arc_file);
 
             Some(cached_file)
@@ -287,7 +300,6 @@ impl Cache {
     }
 
 
-    // TODO having to sort the priorities kills performance on caches with many cached files.
     /// Gets a vector of tuples containing the Path, priority score, and size in bytes of all items
     /// in the file_map.
     ///
@@ -295,35 +307,37 @@ impl Cache {
     /// This allows the assumption that the last element to be popped from the vector will have the
     /// lowest priority, and therefore is the most eligible candidate for elimination from the
     /// cache.
-    fn sorted_priorities(&self) -> Vec<(PathBuf, usize, usize)> {
+    fn sorted_priorities(&self) -> Vec<(PathBuf, FileStats)> {
 
-        let mut priorities: Vec<(PathBuf, usize, usize)> = self.file_map
+        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_map
             .iter()
             .map(|file| {
                 let (file_key, sized_file) = file;
                 let size: usize = sized_file.size;
 
-                let count_and_priority: AccessCountAndPriority = self.count_and_priority_map
+                let stats: FileStats = self.file_stats_map
                     .get(file_key)
                     .unwrap_or(
-                        &AccessCountAndPriority{
-                            access_count: 1,
-                            priority_score: (self.priority_function)(1, size) // The priority function needs to be ran, because the priority score _must_ be set here to prevent immediate, incorrect invalidation.
+                        &FileStats {
+                            size: 0,
+                            access_count: 0,
+                            priority: 0,
                         }
                     )
                     .clone();
 
-                (file_key.clone(), count_and_priority.priority_score, size)
+                (file_key.clone(), stats)
             })
             .collect();
 
         // Sort the priorities from highest priority to lowest, so when they are pop()ed later,
         // the last element will have the lowest priority.
-        priorities.sort_by(|l, r| r.1.cmp(&l.1));
+        priorities.sort_by(|l, r| r.1.priority.cmp(&l.1.priority));
         priorities
     }
 
 
+    // TODO consider replacing this with a member variable that is updated when something is removed or added.
     /// Gets the size of the files that constitute the file_map.
     fn size_bytes(&self) -> usize {
         self.file_map.iter().fold(0usize, |size, x| size + x.1.size)
@@ -360,6 +374,17 @@ mod tests {
     const FILE_MEG2: &'static str = "meg2.txt";
     const FILE_MEG5: &'static str = "meg5.txt";
     const FILE_MEG10: &'static str = "meg10.txt";
+
+    // Helper function that creates test files in a directory that is cleaned up after the test runs.
+    fn create_test_file(temp_dir: &TempDir, size: usize, name: &str) -> PathBuf {
+        let path = temp_dir.path().join(name);
+        let tmp_file = File::create(path.clone()).unwrap();
+        let mut rand_data: Vec<u8> = vec![0u8; size];
+        StdRng::new().unwrap().fill_bytes(rand_data.as_mut());
+        let mut buffer = BufWriter::new(tmp_file);
+        buffer.write(&rand_data).unwrap();
+        path
+    }
 
 
     #[bench]
@@ -584,8 +609,37 @@ mod tests {
             let file: *const SizedFile = Arc::into_raw(cached_file.file);
             unsafe {
                 let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+                let _ = Arc::from_raw(file);
             }
+        });
+    }
+
+
+    /// A sized file read is twice as bad as a Named file due to the ARC::new()
+    #[bench]
+    fn sized_file_read_10mb(b: &mut Bencher) {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+
+        b.iter(|| {
+            let sized_file = Arc::new(SizedFile::open(path_10m.clone()).unwrap());
+            let file: *const SizedFile = Arc::into_raw(sized_file);
+            unsafe {
+                let _ = (*file).bytes.clone();
+                let _ = Arc::from_raw(file);
+            }
+        });
+    }
+
+    /// A sized file read is twice as bad as a Named file due to the ARC::new()
+    #[bench]
+    fn sized_file_read_10mb_without_arc(b: &mut Bencher) {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+
+        b.iter(|| {
+            let sized_file = SizedFile::open(path_10m.clone()).unwrap();
+            let _ = sized_file.bytes.clone();
         });
     }
 
@@ -649,16 +703,6 @@ mod tests {
 
 
 
-    // Helper function that creates test files in a directory that is cleaned up after the test runs.
-    fn create_test_file(temp_dir: &TempDir, size: usize, name: &str) -> PathBuf {
-        let path = temp_dir.path().join(name);
-        let tmp_file = File::create(path.clone()).unwrap();
-        let mut rand_data: Vec<u8> = vec![0u8; size];
-        StdRng::new().unwrap().fill_bytes(rand_data.as_mut());
-        let mut buffer = BufWriter::new(tmp_file);
-        buffer.write(&rand_data).unwrap();
-        path
-    }
 
     #[test]
     fn new_file_replaces_lowest_priority_file() {
@@ -672,7 +716,6 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
 
         cache.increment_access_count(&path_5m);
-        cache.update_priority_score(&path_5m);
         assert_eq!(
             cache.try_store(
                 path_5m.clone(),
@@ -680,9 +723,10 @@ mod tests {
             ),
             Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
         );
+        cache.update_stats(&path_5m);
+
 
         cache.increment_access_count(&path_2m);
-        cache.update_priority_score(&path_2m);
         assert_eq!(
             cache.try_store(
                 path_2m.clone(),
@@ -690,10 +734,11 @@ mod tests {
             ),
             Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
         );
+        cache.update_stats(&path_2m);
+
 
         // The cache will not accept the 1 meg file because sqrt(2)_size * 1_access is greater than sqrt(1)_size * 1_access
         cache.increment_access_count(&path_1m);
-        cache.update_priority_score(&path_1m);
         assert_eq!(
             cache.try_store(
                 path_1m.clone(),
@@ -701,11 +746,12 @@ mod tests {
             ),
             Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
         );
+        cache.update_stats(&path_1m);
+
 
         // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
         // file is less than (sqrt(1)_size * 2_access) for the new file.
         cache.increment_access_count(&path_1m);
-        cache.update_priority_score(&path_1m);
         assert_eq!(
             cache.try_store(
                 path_1m.clone(),
@@ -713,6 +759,8 @@ mod tests {
             ),
             Ok(CacheInvalidationSuccess::ReplacedFile)
         );
+        cache.update_stats(&path_1m);
+
 
         if let None = cache.get_from_cache(&path_1m) {
             assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
