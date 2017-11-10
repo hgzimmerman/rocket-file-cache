@@ -401,10 +401,10 @@ mod tests {
     fn named_file_read_10mb(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
-
+        use std;
         b.iter(|| {
             let mut named_file = NamedFile::open(path_10m.clone()).unwrap();
-            let mut v :Vec<u8> = vec![];
+            let mut v :Vec<u8> = Vec::with_capacity(MEG10);
             named_file.read_to_end(&mut v).unwrap();
         });
     }
