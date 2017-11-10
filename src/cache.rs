@@ -24,8 +24,8 @@ pub enum CacheInvalidationSuccess {
     InsertedFileIntoAvailableSpace,
 }
 
-#[derive(Debug, PartialEq)]
-struct AccessCountAndPriority {
+#[derive(Debug, PartialEq, Clone)]
+pub struct AccessCountAndPriority {
     access_count: usize,
     priority_score: usize
 }
@@ -57,8 +57,7 @@ pub struct Cache {
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
-    // TODO: Make the access_count_map hold a priority
-    pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
+    pub(crate) count_and_priority_map: HashMap<PathBuf, AccessCountAndPriority>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
 
@@ -77,7 +76,7 @@ impl Cache {
             max_file_size: usize::MAX,
             priority_function: DEFAULT_PRIORITY_FUNCTION,
             file_map: HashMap::new(),
-            access_count_map: HashMap::new(),
+            count_and_priority_map: HashMap::new(),
         }
     }
 
@@ -112,19 +111,26 @@ impl Cache {
         // If there is negative required space, then we can just add the file to the cache, as it will fit.
         if required_space_for_new_file < 0 {
             debug!("Cache has room for the file.");
-            self.file_map.insert(path, file);
+            self.file_map.insert(path.clone(), file);
+            self.update_priority_score(&path);
             Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
         } else {
             // Otherwise, the cache will have to try to make some room for the new file
 
-            let new_file_access_count: usize = *self.access_count_map.get(&path).unwrap_or(&0usize);
+            // The access_count should have incremented since the last time this was called, so the priority must be recalculated.
+            // Also, the size generally
+            let new_file_access_count: usize = match self.count_and_priority_map.get(&path) {
+                Some(count_and_priority) => count_and_priority.access_count,
+                None => 1,
+            };
             let new_file_priority: usize = (self.priority_function)(new_file_access_count, file.size);
 
 
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
                 Ok(_) => {
                     debug!("Made room in the cache for new file. Adding new file to cache.");
-                    self.file_map.insert(path, file);
+                    self.file_map.insert(path.clone(), file);
+                    self.update_priority_score(&path);
                     Ok(CacheInvalidationSuccess::ReplacedFile)
                 }
                 Err(e) => {
@@ -200,10 +206,38 @@ impl Cache {
     ///
     /// This should only be used in cases where the file is known to exist, to avoid bloating the access count map with useless values.
     fn increment_access_count(&mut self, path: &PathBuf) {
-        let count: &mut usize = self.access_count_map.entry(path.to_path_buf()).or_insert(
-            0usize,
+        let count_and_priority: &mut AccessCountAndPriority = self.count_and_priority_map.entry(path.to_path_buf()).or_insert(
+            // By default, the count and priority will be 0.
+            // The count will immediately be incremented, and the score can't be calculated without the size of the file in question.
+            // Therefore, files not in the cache MUST have their priority score calculated on insertion attempt.
+            AccessCountAndPriority {
+                access_count: 0,
+                priority_score: 0
+            },
         );
-        *count += 1; // Increment the access count
+        count_and_priority.access_count += 1; // Increment the access count
+    }
+
+
+    fn update_priority_score(&mut self, path: &PathBuf) {
+        let file_size: usize = match self.get(path){
+            Some(cached_file) => cached_file.file.size,
+            None => {
+                0
+            }
+        };
+
+        let count_and_priority: &mut AccessCountAndPriority = self.count_and_priority_map.entry(path.to_path_buf()).or_insert(
+            // By default, the count and priority will be 0.
+            // The count will immediately be incremented, and the score can't be calculated without the size of the file in question.
+            // Therefore, files not in the cache MUST have their priority score calculated on insertion attempt.
+            AccessCountAndPriority {
+                access_count: 0,
+                priority_score: 0
+            },
+        );
+
+        count_and_priority.priority_score = (self.priority_function)(count_and_priority.access_count, file_size); // update the priority score.
     }
 
     /// Either gets the file from the cache if it exists there, gets it from the filesystem and
@@ -220,6 +254,7 @@ impl Cache {
             if let Some(cache_file) = self.get(&pathbuf) {
                 debug!("Cache hit for file: {:?}", pathbuf);
                 self.increment_access_count(&pathbuf); // File is in the cache, increment the count
+                self.update_priority_score(&pathbuf);
                 return Some(cache_file);
             }
         }
@@ -236,7 +271,9 @@ impl Cache {
                 file: arc_file.clone(),
             };
 
-            let _ = self.try_store(pathbuf, arc_file); // possibly stores the cached file in the store.
+            // possibly stores the cached file in the store.
+            let _ = self.try_store(pathbuf.clone(), arc_file);
+
             Some(cached_file)
         } else {
             // Indicate that the file was not found in either the filesystem or cache.
@@ -245,6 +282,8 @@ impl Cache {
         }
     }
 
+
+    // TODO having to sort the priorities kills performance on caches with many cached files.
     /// Gets a vector of tuples containing the Path, priority score, and size in bytes of all items
     /// in the file_map.
     ///
@@ -258,14 +297,19 @@ impl Cache {
             .iter()
             .map(|file| {
                 let (file_key, sized_file) = file;
-                let access_count: usize = self.access_count_map
-                    .get(file_key)
-                    .unwrap_or(&1usize)
-                    .clone();
                 let size: usize = sized_file.size;
-                let priority: usize = (self.priority_function)(access_count, size);
 
-                (file_key.clone(), priority, size)
+                let count_and_priority: AccessCountAndPriority = self.count_and_priority_map
+                    .get(file_key)
+                    .unwrap_or(
+                        &AccessCountAndPriority{
+                            access_count: 1,
+                            priority_score: (self.priority_function)(1, size) // The priority function needs to be ran, because the priority score _must_ be set here to prevent immediate, incorrect invalidation.
+                        }
+                    )
+                    .clone();
+
+                (file_key.clone(), count_and_priority.priority_score, size)
             })
             .collect();
 
@@ -282,7 +326,6 @@ impl Cache {
     }
 
 }
-
 
 
 
@@ -450,6 +493,90 @@ mod tests {
         });
     }
 
+    // Constant time access regardless of size.
+    #[bench]
+    fn cache_get_1mb_from_1000_entry_cache(b: &mut Bencher) {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
+        let mut cache: Cache = Cache::new(MEG1 *3); //Cache can hold 3Mb
+        cache.get_or_cache(path_1m.clone()); // add the file to the cache
+
+        // Add 1024 1kib files to the cache.
+        for i in 0..1024 {
+            let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
+            // make sure that the file has a high priority.
+            for _ in 0..10000 {
+                cache.get_or_cache(path.clone());
+            }        }
+
+        assert_eq!(cache.size_bytes(), MEG1 * 2);
+
+        b.iter(|| {
+            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
+            // Mimic what is done when the response body is set.
+            let file: *const SizedFile = Arc::into_raw(cached_file.file);
+            unsafe {
+                let _ = (*file).bytes.clone();
+                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            }
+        });
+    }
+
+    // There is a penalty for missing the cache.
+    #[bench]
+    fn cache_miss_1mb_from_1000_entry_cache(b: &mut Bencher) {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
+        let mut cache: Cache = Cache::new(MEG1 ); //Cache can hold 1Mb
+
+        // Add 1024 1kib files to the cache.
+        for i in 0..1024 {
+            let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
+            // make sure that the file has a high priority.
+            for _ in 0..1000 {
+                cache.get_or_cache(path.clone());
+            }
+        }
+
+        b.iter(|| {
+            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
+            // Mimic what is done when the response body is set.
+            let file: *const SizedFile = Arc::into_raw(cached_file.file);
+            unsafe {
+                let _ = (*file).bytes.clone();
+                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            }
+        });
+    }
+
+    // This is pretty much a worst-case scenario, where every file would have to be removed to make room for the new file.
+    // There is a penalty for missing the cache.
+    #[bench]
+    fn cache_miss_5mb_from_1000_entry_cache(b: &mut Bencher) {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG1);
+        let mut cache: Cache = Cache::new(MEG5 ); //Cache can hold 1Mb
+
+        // Add 1024 5kib files to the cache.
+        for i in 0..1024 {
+            let path = create_test_file(&temp_dir, 1024 * 5, format!("{}_5kib.txt", i).as_str());
+            // make sure that the file has a high priority.
+            for _ in 0..1000 {
+                cache.get_or_cache(path.clone());
+            }
+        }
+
+        b.iter(|| {
+            let cached_file = cache.get_or_cache(path_5m.clone()).unwrap();
+            // Mimic what is done when the response body is set.
+            let file: *const SizedFile = Arc::into_raw(cached_file.file);
+            unsafe {
+                let _ = (*file).bytes.clone();
+                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            }
+        });
+    }
+
 
     #[test]
     fn file_exceeds_size_limit() {
@@ -474,6 +601,7 @@ mod tests {
 
 
         let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
+        cache.increment_access_count(&path_5m);
         assert_eq!(
             cache.try_store(
                 path_5m.clone(),
@@ -532,6 +660,7 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
 
         cache.increment_access_count(&path_5m);
+        cache.update_priority_score(&path_5m);
         assert_eq!(
             cache.try_store(
                 path_5m.clone(),
@@ -541,6 +670,7 @@ mod tests {
         );
 
         cache.increment_access_count(&path_2m);
+        cache.update_priority_score(&path_2m);
         assert_eq!(
             cache.try_store(
                 path_2m.clone(),
@@ -551,6 +681,7 @@ mod tests {
 
         // The cache will not accept the 1 meg file because sqrt(2)_size * 1_access is greater than sqrt(1)_size * 1_access
         cache.increment_access_count(&path_1m);
+        cache.update_priority_score(&path_1m);
         assert_eq!(
             cache.try_store(
                 path_1m.clone(),
@@ -562,6 +693,7 @@ mod tests {
         // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
         // file is less than (sqrt(1)_size * 2_access) for the new file.
         cache.increment_access_count(&path_1m);
+        cache.update_priority_score(&path_1m);
         assert_eq!(
             cache.try_store(
                 path_1m.clone(),
