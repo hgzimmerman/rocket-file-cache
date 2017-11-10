@@ -87,12 +87,16 @@ impl Cache {
     /// but the cache is full, a file will have to be removed from the cache to make room
     /// for the new file.
     ///
+    /// If the insertion works, the cache will update the priority score for the file being inserted.
+    /// The cached priority score requires the file in question to exist in the file map, so it will
+    /// have a size to use when calculating.
+    ///
     /// # Arguments
     ///
     /// * `path` - The path of the file to be stored. Acts as a key for the file in the cache.
     /// * `file` - A file that will be attempted to be stored in the cache.
     ///
-    pub fn try_store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> Result<CacheInvalidationSuccess, CacheInvalidationError> {
+    fn try_store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> Result<CacheInvalidationSuccess, CacheInvalidationError> {
         debug!("Possibly storing file: {:?} in the Cache.", path);
 
         // Don't store the file if is too big or small.
@@ -189,7 +193,7 @@ impl Cache {
     }
 
     ///Helper function that gets the file from the cache if it exists there.
-    fn get(&mut self, path: &PathBuf) -> Option<CachedFile> {
+    fn get_from_cache(&mut self, path: &PathBuf) -> Option<CachedFile> {
         match self.file_map.get(path) {
             Some(sized_file) => {
                 Some(CachedFile {
@@ -220,7 +224,7 @@ impl Cache {
 
 
     fn update_priority_score(&mut self, path: &PathBuf) {
-        let file_size: usize = match self.get(path){
+        let file_size: usize = match self.get_from_cache(path){
             Some(cached_file) => cached_file.file.size,
             None => {
                 0
@@ -251,7 +255,7 @@ impl Cache {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
         {
-            if let Some(cache_file) = self.get(&pathbuf) {
+            if let Some(cache_file) = self.get_from_cache(&pathbuf) {
                 debug!("Cache hit for file: {:?}", pathbuf);
                 self.increment_access_count(&pathbuf); // File is in the cache, increment the count
                 self.update_priority_score(&pathbuf);
@@ -335,17 +339,13 @@ mod tests {
     extern crate tempdir;
     extern crate rand;
 
-    use self::tempdir::TempDir;
-
     use super::*;
 
-
+    use self::tempdir::TempDir;
     use self::test::Bencher;
     use self::rand::{StdRng, Rng};
     use std::io::{Write, BufWriter};
     use std::fs::File;
-
-    use rocket::response::Response;
     use rocket::response::NamedFile;
     use std::io::Read;
 
@@ -387,9 +387,13 @@ mod tests {
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_10m.clone()).unwrap(); // Cache will not get the file
-            let mut response: Response = Response::new();
-            cached_file.set_response_body(&mut response);
+            let cached_file = cache.get_or_cache(path_10m.clone()).unwrap();
+            // Mimic what is done when the response body is set.
+            let file: *const SizedFile = Arc::into_raw(cached_file.file);
+            unsafe {
+                let _ = (*file).bytes.clone();
+                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            }
         });
     }
 
@@ -430,9 +434,13 @@ mod tests {
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap(); // Cache will not get the file
-            let mut response: Response = Response::new();
-            cached_file.set_response_body(&mut response);
+            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
+            // Mimic what is done when the response body is set.
+            let file: *const SizedFile = Arc::into_raw(cached_file.file);
+            unsafe {
+                let _ = (*file).bytes.clone();
+                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            }
         });
     }
 
@@ -475,9 +483,13 @@ mod tests {
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_5m.clone()).unwrap(); // Cache will not get the file
-            let mut response: Response = Response::new();
-            cached_file.set_response_body(&mut response);
+            let cached_file = cache.get_or_cache(path_5m.clone()).unwrap();
+            // Mimic what is done when the response body is set.
+            let file: *const SizedFile = Arc::into_raw(cached_file.file);
+            unsafe {
+                let _ = (*file).bytes.clone();
+                let _ = Arc::from_raw(file); // Prevent dangling pointer?
+            }
         });
     }
 
@@ -702,18 +714,18 @@ mod tests {
             Ok(CacheInvalidationSuccess::ReplacedFile)
         );
 
-        if let None = cache.get(&path_1m) {
+        if let None = cache.get_from_cache(&path_1m) {
             assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
         }
 
         // Get directly from the cache, no FS involved.
-        if let None = cache.get(&path_5m) {
+        if let None = cache.get_from_cache(&path_5m) {
             assert_eq!(&path_5m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
             // If this has failed, the cache removed the wrong file, implying the ordering of
             // priorities is wrong. It should remove the path_2m file instead.
         }
 
-        if let Some(_) = cache.get(&path_2m) {
+        if let Some(_) = cache.get_from_cache(&path_2m) {
             assert_eq!(&path_2m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
         }
     }
