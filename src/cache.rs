@@ -24,6 +24,11 @@ pub enum CacheInvalidationSuccess {
     InsertedFileIntoAvailableSpace,
 }
 
+#[derive(Debug, PartialEq)]
+struct AccessCountAndPriority {
+    access_count: usize,
+    priority_score: usize
+}
 
 
 /// The Cache holds a number of files whose bytes fit into its size_limit.
@@ -41,6 +46,7 @@ pub enum CacheInvalidationSuccess {
 /// If removing the first file doesn't free up enough space for the new file, then the file with the
 /// next lowest priority will have its priority added to the other removed file's and the aggregate
 /// cached file's priority will be tested against the new file's.
+///
 /// This will repeat until either enough space can be freed for the new file, and the new file is
 /// inserted, or until the priority of the cached files is greater than that of the new file,
 /// in which case, the new file isn't inserted.
@@ -51,6 +57,7 @@ pub struct Cache {
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
+    // TODO: Make the access_count_map hold a priority
     pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
@@ -62,6 +69,7 @@ impl Cache {
     /// # Arguments
     ///
     /// * `size_limit` - The number of bytes that the Cache is allowed to hold at a given time.
+    ///
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
@@ -83,7 +91,8 @@ impl Cache {
     /// # Arguments
     ///
     /// * `path` - The path of the file to be stored. Acts as a key for the file in the cache.
-    /// * `file` - A `Arc<SizedFile>` that will be attempted to be stored in the cache.
+    /// * `file` - A file that will be attempted to be stored in the cache.
+    ///
     pub fn try_store(&mut self, path: PathBuf, file: Arc<SizedFile>) -> Result<CacheInvalidationSuccess, CacheInvalidationError> {
         debug!("Possibly storing file: {:?} in the Cache.", path);
 
