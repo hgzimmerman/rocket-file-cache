@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::usize;
 use rocket::response::NamedFile;
+use std::fs::Metadata;
+use std::fs;
 
 use cached_file::CachedFile;
 use cached_file::RespondableFile;
@@ -97,6 +99,7 @@ impl Cache {
     }
 
 
+    // TODO rename this back to try_insert()
     /// Attempt to store a given file in the the cache.
     /// Storing will fail if the current files have more access attempts than the file being added.
     /// If the provided file has more more access attempts than one of the files in the cache,
@@ -107,14 +110,27 @@ impl Cache {
     /// The cached priority score requires the file in question to exist in the file map, so it will
     /// have a size to use when calculating.
     ///
+    /// It will get the size of the file to be inserted.
+    /// If will use this size to check if the file could be inserted.
+    /// If it can be inserted, it reads the file into memory, stores a copy of the in-memory file behind a pointer, and constructs
+    /// a RespondableFile to return.
+    ///
+    /// If the file can't be added, it will open a NamedFile and construct a RespondableFile from that,
+    /// and return it.
+    /// This means that it doesn't need to read the whole file into memory before reading through it
+    /// again to set the response body.
+    /// The lack of the need to read the whole file twice keeps performance of cache misses on par
+    /// with just normally reading the file without a cache.
+    ///
+    ///
     /// # Arguments
     ///
-    /// * `path` - The path of the file to be stored. Acts as a key for the file in the cache.
-    /// * `file` - A file that will be attempted to be stored in the cache.
+    /// * `path` - The path of the file to be stored. Acts as a key for the file in the cache. Is used
+    /// look up the location of the file in the filesystem if the file is not in the cache.
+    ///
     ///
     fn check_for_insertion(&mut self, path: PathBuf) -> Result< RespondableFile, CacheInvalidationError> {
-        use std::fs::Metadata;
-        use std::fs;
+
         let path_string: String = match path.clone().to_str() {
             Some(s) => String::from(s),
             None => return Err(CacheInvalidationError::InvalidPath)
@@ -161,10 +177,8 @@ impl Cache {
             let new_file_access_count: usize = self.access_count_map.get(&path).unwrap_or(&1).clone();
             let new_file_priority: usize = (self.priority_function)(new_file_access_count, size);
 
-
-            // TODO maybe this should return the files that were removed so they can be reinserted if the opening of the sized file fails.
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
-                Ok(_) => {
+                Ok(removed_files) => {
                     debug!("Made room for new file");
                     match SizedFile::open(path.as_path()) {
                         Ok(file) => {
@@ -178,7 +192,11 @@ impl Cache {
                             return Ok(RespondableFile::from(cached_file))
                         }
                         Err(_) => {
-                            // TODO Reinsert removed files here.
+                            // The insertion failed, so the removed files need to be re-added to the
+                            // cache
+                            removed_files.into_iter().for_each( |removed_file| {
+                                self.file_map.insert(removed_file.path, removed_file.file);
+                            });
                             return Err(CacheInvalidationError::InvalidPath)
                         }
                     }
@@ -210,7 +228,7 @@ impl Cache {
     /// * `required_space` - A `usize` representing the number of bytes that must be freed to make room for a new file.
     /// * `new_file_priority` - A `usize` representing the priority of the new file to be added. If the priority of the files possibly being removed
     /// is greater than this value, then the files won't be removed.
-    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<(), CacheInvalidationError> {
+    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<Vec<CachedFile>, CacheInvalidationError> {
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec![];
@@ -237,11 +255,25 @@ impl Cache {
             };
         }
 
+        // Hold on to the arc pointers to the files, if for whatever reason, the new file can't be
+        // read, these will need to be added back to the cache.
+        let mut return_vec: Vec<CachedFile> = vec![];
+
         // If this hasn't returned early, then the files to remove are less important than the new file.
         for file_key in file_paths_to_remove {
-            self.file_map.remove(&file_key);
+            // The file was accessed with this key earlier when sorting priorities.
+            // Unwrapping should be safe.
+
+            // TODO verify that entries are properly removed from the file_stats_map. I don't think they are.
+            let sized_file = self.file_map.remove(&file_key).unwrap();
+
+            let removed_cached_file = CachedFile {
+                path: file_key.clone(),
+                file: sized_file
+            };
+            return_vec.push(removed_cached_file);
         }
-        return Ok(());
+        return Ok(return_vec);
     }
 
     ///Helper function that gets the file from the cache if it exists there.
@@ -320,6 +352,8 @@ impl Cache {
     /// This allows the assumption that the last element to be popped from the vector will have the
     /// lowest priority, and therefore is the most eligible candidate for elimination from the
     /// cache.
+    ///
+    ///
     fn sorted_priorities(&self) -> Vec<(PathBuf, FileStats)> {
 
         let mut priorities: Vec<(PathBuf, FileStats)> = self.file_map
@@ -348,8 +382,6 @@ impl Cache {
         priorities
     }
 
-
-    // TODO consider replacing this with a member variable that is updated when something is removed or added.
     /// Gets the size of the files that constitute the file_map.
     fn size_bytes(&self) -> usize {
         self.file_map.iter().fold(0usize, |size, x| size + x.1.size)
@@ -413,7 +445,7 @@ mod tests {
                 }
                 Right(mut named_file) => {
                     let mut v :Vec<u8> = Vec::new();
-                    named_file.read_to_end(&mut v).unwrap();
+                    let _ = named_file.read_to_end(&mut v).unwrap();
                 }
             }
         }
@@ -451,7 +483,7 @@ mod tests {
         use std;
         b.iter(|| {
             let mut named_file = NamedFile::open(path_10m.clone()).unwrap();
-            let mut v :Vec<u8> = Vec::with_capacity(MEG10);
+            let mut v :Vec<u8> = Vec::new();
             named_file.read_to_end(&mut v).unwrap();
         });
     }
@@ -488,7 +520,7 @@ mod tests {
 
         b.iter(|| {
             let mut named_file = NamedFile::open(path_1m.clone()).unwrap();
-            let mut v :Vec<u8> = vec![];
+            let mut v :Vec<u8> = Vec::new();
             named_file.read_to_end(&mut v).unwrap();
         });
     }
@@ -527,7 +559,7 @@ mod tests {
 
         b.iter(|| {
             let mut named_file = NamedFile::open(path_5m.clone()).unwrap();
-            let mut v :Vec<u8> = vec![];
+            let mut v :Vec<u8> = Vec::new();
             named_file.read_to_end(&mut v).unwrap();
         });
     }
@@ -618,18 +650,6 @@ mod tests {
                 let _ = (*file).bytes.clone();
                 let _ = Arc::from_raw(file);
             }
-        });
-    }
-
-    /// A sized file read is twice as bad as a Named file due to the ARC::new()
-    #[bench]
-    fn sized_file_read_10mb_without_arc(b: &mut Bencher) {
-        let temp_dir = TempDir::new(DIR_TEST).unwrap();
-        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
-
-        b.iter(|| {
-            let sized_file = SizedFile::open(path_10m.clone()).unwrap();
-            let _ = sized_file.bytes.clone();
         });
     }
 
