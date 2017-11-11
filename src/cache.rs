@@ -2,10 +2,16 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::usize;
+use either::*;
+use rocket::response::NamedFile;
 
 use cached_file::CachedFile;
+use cached_file::RespondableFile;
+
 use sized_file::SizedFile;
 use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
+
+
 
 
 
@@ -15,7 +21,9 @@ pub enum CacheInvalidationError {
     NewPriorityIsNotHighEnough,
     NewFileSmallerThanMin,
     NewFileLargerThanMax,
-    NewFileLargerThanCache
+    NewFileLargerThanCache,
+    InvalidMetadata,
+    InvalidPath,
 }
 
 #[derive(Debug, PartialEq)]
@@ -153,6 +161,94 @@ impl Cache {
         }
     }
 
+
+    //Todo this is a replacement for try_store()
+    fn check_for_insertion(&mut self, path: PathBuf) -> Result< RespondableFile, CacheInvalidationError> {
+        use std::fs::Metadata;
+        use std::fs;
+        let path_string: String = match path.clone().to_str() {
+            Some(s) => String::from(s),
+            None => return Err(CacheInvalidationError::InvalidPath)
+        };
+        let metadata: Metadata = match fs::metadata(path_string.as_str()) {
+            Ok(m) => m,
+            Err(_) => return Err(CacheInvalidationError::InvalidMetadata)
+        };
+        let size: usize = metadata.len() as usize;
+
+
+        if size > self.max_file_size {
+            return Err(CacheInvalidationError::NewFileLargerThanMax)
+        }
+        if size < self.min_file_size {
+            return Err(CacheInvalidationError::NewFileSmallerThanMin)
+        }
+
+        let required_space_for_new_file: isize = (self.size_bytes() as isize + size as isize) - self.size_limit as isize;
+
+        if required_space_for_new_file < 0 && size < self.size_limit {
+            debug!("Cache has room for the file.");
+            match SizedFile::open(path.as_path()) {
+                Ok(file) => {
+                    let arc_file: Arc<SizedFile> = Arc::new(file);
+                    self.file_map.insert(path.clone(), arc_file.clone());
+                    self.update_stats(&path);
+                    let cached_file = CachedFile {
+                        path: path.clone(),
+                        file: arc_file
+                    };
+                    return Ok(RespondableFile::from(cached_file))
+                }
+                Err(_) => {
+                    return Err(CacheInvalidationError::InvalidPath)
+                }
+            }
+
+        } else {
+            debug!("Trying to make room for the file");
+
+            // The access_count should have incremented since the last time this was called, so the priority must be recalculated.
+            // Also, the size generally
+            let new_file_access_count: usize = self.access_count_map.get(&path).unwrap_or(&1).clone();
+            let new_file_priority: usize = (self.priority_function)(new_file_access_count, size);
+
+
+            // TODO maybe this should return the files that were removed so they can be reinserted if the opening of the sized file fails.
+            match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
+                Ok(_) => {
+                    debug!("Made room for new file");
+                    match SizedFile::open(path.as_path()) {
+                        Ok(file) => {
+                            let arc_file: Arc<SizedFile> = Arc::new(file);
+                            self.file_map.insert(path.clone(), arc_file.clone());
+                            self.update_stats(&path);
+                            let cached_file = CachedFile {
+                                path,
+                                file: arc_file
+                            };
+                            return Ok(RespondableFile::from(cached_file))
+                        }
+                        Err(_) => {
+                            // TODO Reinsert removed files here.
+                            return Err(CacheInvalidationError::InvalidPath)
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("The file does not have enough priority or is too large to be accepted into the cache.");
+                    // The new file would not be accepted by the cache, so instead of reading the whole file
+                    // into memory, and then copying it yet again when it is attached to the body of the
+                    // response, use a NamedFile instead.
+                    match NamedFile::open(path) {
+                        Ok(named_file) => Ok(RespondableFile::from(named_file)),
+                        Err(_) => Err(CacheInvalidationError::InvalidPath)
+                    }
+                }
+            }
+        }
+
+    }
+
     /// Remove the n lowest priority files to make room for a file with a size: required_space.
     ///
     /// If this returns an OK, this function has removed the required file space from the file_map.
@@ -252,7 +348,7 @@ impl Cache {
     ///
     /// * `pathbuf` - A pathbuf that represents the path of the file in the fileserver. The pathbuf
     /// also acts as a key for the file in the cache.
-    pub fn get_or_cache(&mut self, pathbuf: PathBuf) -> Option<CachedFile> {
+    pub fn get_or_cache(&mut self, pathbuf: PathBuf) -> Option<RespondableFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
         {
@@ -260,42 +356,16 @@ impl Cache {
                 debug!("Cache hit for file: {:?}", pathbuf);
                 self.increment_access_count(&pathbuf); // File is in the cache, increment the count
                 self.update_stats(&pathbuf);
-                return Some(cache_file);
+                return Some(RespondableFile::from(cache_file));
             }
         }
 
-        // TODO:----------------------
-        // Reading a sized file is where all the performance is lost when there is a cache miss,
-        // a sized file requires copying all bytes into the structure in the file, and then this is read again later
-        // effectively causing the whole file to be read twice.
-        //
-        // It would be nice if the sized file could be either a wrapped file handle if it is being returned as
-        // a cache miss, or as a vector of bytes if it is going to be stored in the cache.
-        //
-        // Possibly have the "CachedFile" type own an Either<SizedFile, File> that is returned when
-        // A cache request is made. The Cache itself would store only SizedFiles.
-        debug!("Cache missed for file: {:?}", pathbuf);
-        // Instead the file needs to read from the filesystem.
-        if let Ok(file) = SizedFile::open(pathbuf.as_path()) {
-            // Because the file exists, but is not in the cache, increment the access count.
-            self.increment_access_count(&pathbuf);
-            // If the file was read, convert it to a cached file and attempt to store it in the cache
-
-            let arc_file: Arc<SizedFile> = Arc::new(file);
-            let cached_file: CachedFile = CachedFile {
-                path: pathbuf.clone(),
-                file: arc_file.clone(),
-            };
-
-            // possibly stores the cached file in the store.
-            // Storing is a pretty cheap operation
-            let _ = self.try_store(pathbuf.clone(), arc_file);
-
-            Some(cached_file)
-        } else {
-            // Indicate that the file was not found in either the filesystem or cache.
-            // This None is interpreted by Rocket by default to forward the request to its 404 handler.
-            None
+        match self.check_for_insertion(pathbuf) {
+            Ok(a) => Some(a),
+            Err(e) => {
+                println!("Error encountered: {:?}",e);
+                None
+            }
         }
     }
 
@@ -387,6 +457,25 @@ mod tests {
     }
 
 
+    impl RespondableFile {
+        fn dummy_write(self) {
+            let either = self;
+            match either.0 {
+                Left(cached_file) => {
+                    let file: *const SizedFile = Arc::into_raw(cached_file.file);
+                    unsafe {
+                        let _ = (*file).bytes.clone();
+                        let _ = Arc::from_raw(file); // Prevent dangling pointer?
+                    }
+                }
+                Right(mut named_file) => {
+                    let mut v :Vec<u8> = Vec::new();
+                    named_file.read_to_end(&mut v).unwrap();
+                }
+            }
+        }
+    }
+
     #[bench]
     fn cache_get_10mb(b: &mut Bencher) {
         let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
@@ -396,12 +485,7 @@ mod tests {
 
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_10m.clone()).unwrap();
-            // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -413,12 +497,7 @@ mod tests {
 
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_10m.clone()).unwrap();
-            // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -443,12 +522,7 @@ mod tests {
 
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
-            // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -460,12 +534,7 @@ mod tests {
 
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
-            // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -492,12 +561,7 @@ mod tests {
 
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_5m.clone()).unwrap();
-            // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -509,12 +573,7 @@ mod tests {
 
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_5m.clone()).unwrap();
-            // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -544,18 +603,14 @@ mod tests {
             // make sure that the file has a high priority.
             for _ in 0..10000 {
                 cache.get_or_cache(path.clone());
-            }        }
+            }
+        }
 
         assert_eq!(cache.size_bytes(), MEG1 * 2);
 
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
-            // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -578,11 +633,7 @@ mod tests {
         b.iter(|| {
             let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
             // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file); // Prevent dangling pointer?
-            }
+            cached_file.dummy_write()
         });
     }
 
@@ -604,13 +655,9 @@ mod tests {
         }
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_5m.clone()).unwrap();
+            let cached_file: RespondableFile = cache.get_or_cache(path_5m.clone()).unwrap();
             // Mimic what is done when the response body is set.
-            let file: *const SizedFile = Arc::into_raw(cached_file.file);
-            unsafe {
-                let _ = (*file).bytes.clone();
-                let _ = Arc::from_raw(file);
-            }
+            cached_file.dummy_write()
         });
     }
 

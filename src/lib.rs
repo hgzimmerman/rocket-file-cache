@@ -2,6 +2,7 @@
 extern crate rocket;
 #[macro_use]
 extern crate log;
+extern crate either;
 
 
 pub mod cache;

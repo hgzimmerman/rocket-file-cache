@@ -6,6 +6,8 @@ use std::result;
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::io;
+use either::*;
+use rocket::response::NamedFile;
 
 use sized_file::SizedFile;
 
@@ -64,5 +66,35 @@ impl Responder<'static> for CachedFile {
         self.set_response_body(&mut response);
 
         Ok(response)
+    }
+}
+
+pub struct RespondableFile(pub(crate) Either<CachedFile,NamedFile>);
+
+impl From<CachedFile> for RespondableFile {
+    fn from(cached_file: CachedFile) -> Self {
+        RespondableFile(Left(cached_file))
+    }
+}
+
+impl From<NamedFile> for RespondableFile {
+    fn from(named_file: NamedFile) -> Self {
+        RespondableFile(Right(named_file))
+    }
+}
+
+impl Responder<'static> for RespondableFile {
+    fn respond_to(self, request: &Request) -> result::Result<Response<'static>, Status> {
+
+        match self.0 {
+            Left(cached_file) => {
+                cached_file.respond_to(request)
+            }
+            Right(named_file) => {
+                named_file.respond_to(request)
+            }
+        }
+
+
     }
 }
