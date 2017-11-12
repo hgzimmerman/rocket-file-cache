@@ -99,6 +99,21 @@ impl Cache {
     }
 
 
+
+    fn get_file_size_from_metadata(path: &PathBuf) -> Result<usize, CacheInvalidationError> {
+        let path_string: String = match path.clone().to_str() {
+            Some(s) => String::from(s),
+            None => return Err(CacheInvalidationError::InvalidPath)
+        };
+        let metadata: Metadata = match fs::metadata(path_string.as_str()) {
+            Ok(m) => m,
+            Err(_) => return Err(CacheInvalidationError::InvalidMetadata)
+        };
+        let size: usize = metadata.len() as usize;
+        Ok(size)
+    }
+
+
     // TODO rename this back to try_insert()
     /// Attempt to store a given file in the the cache.
     /// Storing will fail if the current files have more access attempts than the file being added.
@@ -131,27 +146,22 @@ impl Cache {
     ///
     fn check_for_insertion(&mut self, path: PathBuf) -> Result< RespondableFile, CacheInvalidationError> {
 
-        let path_string: String = match path.clone().to_str() {
-            Some(s) => String::from(s),
-            None => return Err(CacheInvalidationError::InvalidPath)
-        };
-        let metadata: Metadata = match fs::metadata(path_string.as_str()) {
-            Ok(m) => m,
-            Err(_) => return Err(CacheInvalidationError::InvalidMetadata)
-        };
-        let size: usize = metadata.len() as usize;
-
-
-        if size > self.max_file_size {
-            return Err(CacheInvalidationError::NewFileLargerThanMax)
-        }
-        if size < self.min_file_size {
-            return Err(CacheInvalidationError::NewFileSmallerThanMin)
-        }
-
+        let size = Cache::get_file_size_from_metadata(&path)?;
         let required_space_for_new_file: isize = (self.size_bytes() as isize + size as isize) - self.size_limit as isize;
 
-        if required_space_for_new_file < 0 && size < self.size_limit {
+
+        if size > self.max_file_size
+            || size < self.min_file_size {
+
+            debug!("File does not fit size constraints of the cache.");
+            match NamedFile::open(path) {
+                Ok(named_file) => return Ok(RespondableFile::from(named_file)),
+                Err(_) => return Err(CacheInvalidationError::InvalidPath)
+            }
+
+        } else if required_space_for_new_file < 0
+            && size < self.size_limit {
+
             debug!("Cache has room for the file.");
             match SizedFile::open(path.as_path()) {
                 Ok(file) => {
@@ -341,6 +351,7 @@ impl Cache {
             }
         }
 
+        // If the file can't be immediately accessed, try to get it from the FS.
         self.check_for_insertion(pathbuf).ok()
     }
 
@@ -353,9 +364,9 @@ impl Cache {
     /// lowest priority, and therefore is the most eligible candidate for elimination from the
     /// cache.
     ///
-    ///
     fn sorted_priorities(&self) -> Vec<(PathBuf, FileStats)> {
 
+        // TODO if the file_map and file_stats_map can be guaranteed to have the same entries, then this outer iter block for the file_map can be removed
         let mut priorities: Vec<(PathBuf, FileStats)> = self.file_map
             .iter()
             .map(|file| {
@@ -653,63 +664,59 @@ mod tests {
         });
     }
 
-//
-//    #[test]
-//    fn file_exceeds_size_limit() {
-//        let mut cache: Cache = Cache::new(MEG1 * 8); // Cache can hold only 8Mb
-//        let temp_dir = TempDir::new(DIR_TEST).unwrap();
-//        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
-//        assert_eq!(
-//            cache.try_store(
-//                path_10m.clone(),
-//                Arc::new(SizedFile::open(path_10m.clone()).unwrap()),
-//            ),
-//            Err(CacheInvalidationError::NewFileLargerThanCache)
-//        )
-//    }
-//
-//    #[test]
-//    fn file_replaces_other_file() {
-//        let temp_dir = TempDir::new(DIR_TEST).unwrap();
-//
-//        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-//        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
-//
-//
-//        let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
-//        cache.increment_access_count(&path_5m);
-//        assert_eq!(
-//            cache.try_store(
-//                path_5m.clone(),
-//                Arc::new(SizedFile::open(path_5m.clone()).unwrap()),
-//            ),
-//            Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
-//        );
-//        cache.increment_access_count(&path_1m); // increment the access count, causing it to have a higher priority the next time it tries to be stored.
-//        assert_eq!(
-//            cache.try_store(
-//                path_1m.clone(),
-//                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
-//            ),
-//            Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
-//        );
-//        cache.increment_access_count(&path_1m);
-//        assert_eq!(
-//            cache.try_store(
-//                path_1m.clone(),
-//                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
-//            ),
-//            Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
-//        );
-//        cache.increment_access_count(&path_1m);
-//        assert_eq!(
-//            cache.try_store(
-//                path_1m.clone(),
-//                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
-//            ),
-//            Ok(CacheInvalidationSuccess::ReplacedFile)
-//        );
-//    }
+
+    #[test]
+    fn file_exceeds_size_limit() {
+        let mut cache: Cache = Cache::new(MEG1 * 8); // Cache can hold only 8Mb
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+
+        let named_file = NamedFile::open(path_10m.clone()).unwrap();
+
+        // expect the cache to get the item from the FS.
+        assert_eq!(
+            cache.check_for_insertion(path_10m),
+            Ok(RespondableFile::from(named_file))
+        );
+    }
+
+
+    #[test]
+    fn file_replaces_other_file() {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+
+        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
+        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
+
+        let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
+        let named_file_1m_2 = NamedFile::open(path_1m.clone()).unwrap();
+
+        let cached_file_5m = CachedFile::open(path_5m.clone()).unwrap();
+        let cached_file_1m = CachedFile::open(path_1m.clone()).unwrap();
+
+
+        let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
+        cache.increment_access_count(&path_5m);
+        assert_eq!(
+            cache.check_for_insertion(path_5m.clone()),
+            Ok(RespondableFile::from(cached_file_5m))
+        );
+        cache.increment_access_count(&path_1m); // increment the access count, causing it to have a higher priority the next time it tries to be stored.
+        assert_eq!(
+            cache.check_for_insertion(path_1m.clone() ),
+            Ok(RespondableFile::from(named_file_1m))
+        );
+        cache.increment_access_count(&path_1m);
+        assert_eq!(
+            cache.check_for_insertion( path_1m.clone() ),
+            Ok(RespondableFile::from(named_file_1m_2))
+        );
+        cache.increment_access_count(&path_1m);
+        assert_eq!(
+            cache.check_for_insertion( path_1m.clone() ),
+            Ok(RespondableFile::from(cached_file_1m))
+        );
+    }
 
 
 

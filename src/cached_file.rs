@@ -69,7 +69,39 @@ impl Responder<'static> for CachedFile {
     }
 }
 
+#[derive(Debug)]
 pub struct RespondableFile(pub(crate) Either<CachedFile,NamedFile>);
+
+
+impl PartialEq for RespondableFile {
+    fn eq(&self, other: &RespondableFile) -> bool {
+        match self.0 {
+            Left(ref lhs_cached_file) => {
+                match other.0 {
+                    Left(ref rhs_cached_file) => {
+                        //TODO This is a VERY lazy implementation, does not currently check if all bytes are the same.
+                        true
+                    }
+                    Right(_) => {
+                        false
+                    }
+                }
+            }
+            Right(ref lhs_named_file) => {
+                match other.0 {
+                    Left(_) => {
+                        false
+                    }
+                    Right(ref rhs_named_file) => {
+                        //TODO This is a VERY lazy implementation, does not currently check if all bytes are the same.
+                        true
+                    }
+                }
+            }
+        }
+
+    }
+}
 
 impl From<CachedFile> for RespondableFile {
     fn from(cached_file: CachedFile) -> Self {
