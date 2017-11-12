@@ -46,7 +46,6 @@ pub struct FileStats {
     priority: usize
 }
 
-// Todo Try adding another hashmap that maps a pathbuf to a struct with the size, priority and access count of only files in the file_map.
 /// The Cache holds a number of files whose bytes fit into its size_limit.
 /// The Cache acts as a proxy to the filesystem.
 /// When a request for a file is made, the Cache checks to see if it has a copy of the file.
@@ -73,8 +72,8 @@ pub struct Cache {
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
-    pub(crate) file_stats_map: HashMap<PathBuf, FileStats>, // TODO this will hold stats for only the files in the file map.
-    pub(crate) access_count_map: HashMap<PathBuf, usize>, // TODO make this go back to just access count // Every file that is accessed will have the number of times it is accessed logged in this map.
+    pub(crate) file_stats_map: HashMap<PathBuf, FileStats>, // Holds stats for only the files in the file map.
+    pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
 
@@ -149,6 +148,7 @@ impl Cache {
         // If the FS can read metadata for a file, then the file exists, and it should be safe to increment
         // the access_count and update.
 
+        // Since these are updated here, the
         self.increment_access_count(&path);
         self.update_stats(&path);
 
@@ -281,9 +281,9 @@ impl Cache {
         for file_key in file_paths_to_remove {
             // The file was accessed with this key earlier when sorting priorities.
             // Unwrapping should be safe.
-
-            // TODO verify that entries are properly removed from the file_stats_map. I don't think they are.
+            println!("trying to remove file_key: {:?}", file_key);
             let sized_file = self.file_map.remove(&file_key).unwrap();
+            let _ = self.file_stats_map.remove(&file_key).unwrap();
 
             let removed_cached_file = CachedFile {
                 path: file_key.clone(),
@@ -347,7 +347,7 @@ impl Cache {
     ///
     /// * `pathbuf` - A pathbuf that represents the path of the file in the fileserver. The pathbuf
     /// also acts as a key for the file in the cache.
-    pub fn get_or_cache(&mut self, pathbuf: PathBuf) -> Option<RespondableFile> {
+    pub fn get(&mut self, pathbuf: PathBuf) -> Option<RespondableFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
         {
@@ -363,6 +363,57 @@ impl Cache {
         self.try_insert(pathbuf).ok()
     }
 
+    // TODO make return type an enum indicating why the refresh failed or succeeded.
+    // A user may update a file on the FS that also may be cached in the cache.
+    // This function will change the in-memory representation of the file at the given pathbuf.
+    // This will also need to update the file_stats entry as well to reflect the new size of the file.
+    // If the file size is drastically reduced, no further action needs to be taken, as the next
+    // insertion attempt for an alternative file will remove the file anyway.
+    pub fn refresh_file(&mut self, pathbuf: &PathBuf) -> bool {
+        // Check if the file exists in the cache
+
+        let mut is_ok_to_refresh: bool = false;
+        if let Some(existing_file) = self.file_map.get(pathbuf)  {
+            // See if the new file exists.
+            let path_string: String = match pathbuf.clone().to_str() {
+                Some(s) => String::from(s),
+                None => return false
+            };
+            if let Ok(metadata) = fs::metadata(path_string.as_str()) {
+                if metadata.is_file(){
+                    // If the stats for the old file exist
+                    if let Some(existing_stats) = self.file_stats_map.get(pathbuf) {
+                        is_ok_to_refresh = true;
+                    }
+                }
+            };
+        }
+
+        if is_ok_to_refresh {
+            if let Ok(new_file) = SizedFile::open(pathbuf.clone()) {
+                {
+                    self.file_map.remove(pathbuf);
+                    self.file_map.insert(pathbuf.clone(), Arc::new(new_file));
+                }
+
+                self.update_stats(pathbuf)
+
+            }
+        }
+        is_ok_to_refresh
+    }
+
+
+    // TODO, add checks and return an enum indicating what happened.
+    pub fn remove_file(&mut self, pathbuf: &PathBuf) {
+        self.file_stats_map.remove(pathbuf);
+        self.file_map.remove(pathbuf);
+        let entry = self.access_count_map.entry(pathbuf.clone()).or_insert(
+            0
+        );
+        *entry = 0
+    }
+
 
     /// Gets a vector of tuples containing the Path, priority score, and size in bytes of all items
     /// in the file_map.
@@ -373,6 +424,12 @@ impl Cache {
     /// cache.
     ///
     fn sorted_priorities(&self) -> Vec<(PathBuf, FileStats)> {
+
+        // TODO, this simplification doesn't work yet because as this is currently called, the file_stats_map has an entry for the new file, but doesn't have an entry in the file_map. This causes an unwrap error farther down the stack. To fix, try only update after inserting.
+//        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_stats_map
+//            .iter()
+//            .map( |x| (x.0.clone(), x.1.clone()))
+//            .collect();
 
         // TODO if the file_map and file_stats_map can be guaranteed to have the same entries, then this outer iter block for the file_map can be removed
         let mut priorities: Vec<(PathBuf, FileStats)> = self.file_map
@@ -475,10 +532,10 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
-        cache.get_or_cache(path_10m.clone()); // add the 10 mb file to the cache
+        cache.get(path_10m.clone()); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_10m.clone()).unwrap();
+            let cached_file = cache.get(path_10m.clone()).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -490,7 +547,7 @@ mod tests {
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_10m.clone()).unwrap();
+            let cached_file = cache.get(path_10m.clone()).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -512,10 +569,10 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-        cache.get_or_cache(path_1m.clone()); // add the 10 mb file to the cache
+        cache.get(path_1m.clone()); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
+            let cached_file = cache.get(path_1m.clone()).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -527,7 +584,7 @@ mod tests {
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
+            let cached_file = cache.get(path_1m.clone()).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -551,10 +608,10 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
-        cache.get_or_cache(path_5m.clone()); // add the 10 mb file to the cache
+        cache.get(path_5m.clone()); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_5m.clone()).unwrap();
+            let cached_file = cache.get(path_5m.clone()).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -566,7 +623,7 @@ mod tests {
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_5m.clone()).unwrap();
+            let cached_file = cache.get(path_5m.clone()).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -589,21 +646,21 @@ mod tests {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
         let mut cache: Cache = Cache::new(MEG1 *3); //Cache can hold 3Mb
-        cache.get_or_cache(path_1m.clone()); // add the file to the cache
+        cache.get(path_1m.clone()); // add the file to the cache
 
         // Add 1024 1kib files to the cache.
         for i in 0..1024 {
             let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
             // make sure that the file has a high priority.
             for _ in 0..10000 {
-                cache.get_or_cache(path.clone());
+                cache.get(path.clone());
             }
         }
 
         assert_eq!(cache.size_bytes(), MEG1 * 2);
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
+            let cached_file = cache.get(path_1m.clone()).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -620,12 +677,12 @@ mod tests {
             let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
             // make sure that the file has a high priority.
             for _ in 0..1000 {
-                cache.get_or_cache(path.clone());
+                cache.get(path.clone());
             }
         }
 
         b.iter(|| {
-            let cached_file = cache.get_or_cache(path_1m.clone()).unwrap();
+            let cached_file = cache.get(path_1m.clone()).unwrap();
             // Mimic what is done when the response body is set.
             cached_file.dummy_write()
         });
@@ -644,12 +701,12 @@ mod tests {
             let path = create_test_file(&temp_dir, 1024 * 5, format!("{}_5kib.txt", i).as_str());
             // make sure that the file has a high priority.
             for _ in 0..1000 {
-                cache.get_or_cache(path.clone());
+                cache.get(path.clone());
             }
         }
 
         b.iter(|| {
-            let cached_file: RespondableFile = cache.get_or_cache(path_5m.clone()).unwrap();
+            let cached_file: RespondableFile = cache.get(path_5m.clone()).unwrap();
             // Mimic what is done when the response body is set.
             cached_file.dummy_write()
         });
@@ -741,25 +798,28 @@ mod tests {
 
         let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
 
+        println!("1:\n{:#?}", cache);
         assert_eq!(
-            cache.get_or_cache(path_5m.clone() ),
+            cache.get(path_5m.clone() ),
             Some(RespondableFile::from(cached_file_5m))
         );
 
+        println!("2:\n{:#?}", cache);
         assert_eq!(
-            cache.get_or_cache( path_2m.clone()),
+            cache.get( path_2m.clone()),
             Some(RespondableFile::from(cached_file_2m))
         );
 
+        println!("3:\n{:#?}", cache);
         assert_eq!(
-            cache.get_or_cache( path_1m.clone() ),
+            cache.get( path_1m.clone() ),
             Some(RespondableFile::from(named_file_1m))
         );
-
+        println!("4:\n{:#?}", cache);
         // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
         // file is less than (sqrt(1)_size * 2_access) for the new file.
         assert_eq!(
-            cache.get_or_cache(path_1m.clone(), ),
+            cache.get(path_1m.clone(), ),
             Some(RespondableFile::from(cached_file_1m))
         );
 
