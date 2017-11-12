@@ -114,7 +114,6 @@ impl Cache {
     }
 
 
-    // TODO rename this back to try_insert()
     /// Attempt to store a given file in the the cache.
     /// Storing will fail if the current files have more access attempts than the file being added.
     /// If the provided file has more more access attempts than one of the files in the cache,
@@ -144,9 +143,17 @@ impl Cache {
     /// look up the location of the file in the filesystem if the file is not in the cache.
     ///
     ///
-    fn check_for_insertion(&mut self, path: PathBuf) -> Result< RespondableFile, CacheInvalidationError> {
+    fn try_insert(&mut self, path: PathBuf) -> Result< RespondableFile, CacheInvalidationError> {
 
         let size = Cache::get_file_size_from_metadata(&path)?;
+        // If the FS can read metadata for a file, then the file exists, and it should be safe to increment
+        // the access_count and update.
+
+        self.increment_access_count(&path);
+        self.update_stats(&path);
+
+        // Determine how much space can still be used (represented by a negative value) or how much
+        // space needs to be freed in order to make room for the new file
         let required_space_for_new_file: isize = (self.size_bytes() as isize + size as isize) - self.size_limit as isize;
 
 
@@ -167,7 +174,6 @@ impl Cache {
                 Ok(file) => {
                     let arc_file: Arc<SizedFile> = Arc::new(file);
                     self.file_map.insert(path.clone(), arc_file.clone());
-                    self.update_stats(&path);
                     let cached_file = CachedFile {
                         path: path.clone(),
                         file: arc_file
@@ -187,6 +193,8 @@ impl Cache {
             let new_file_access_count: usize = self.access_count_map.get(&path).unwrap_or(&1).clone();
             let new_file_priority: usize = (self.priority_function)(new_file_access_count, size);
 
+
+
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
                 Ok(removed_files) => {
                     debug!("Made room for new file");
@@ -194,7 +202,6 @@ impl Cache {
                         Ok(file) => {
                             let arc_file: Arc<SizedFile> = Arc::new(file);
                             self.file_map.insert(path.clone(), arc_file.clone());
-                            self.update_stats(&path);
                             let cached_file = CachedFile {
                                 path,
                                 file: arc_file
@@ -223,8 +230,9 @@ impl Cache {
                 }
             }
         }
-
     }
+
+
 
     /// Remove the n lowest priority files to make room for a file with a size: required_space.
     ///
@@ -317,7 +325,7 @@ impl Cache {
     fn update_stats(&mut self, path: &PathBuf) {
         let size: usize = match self.file_map.get(path){
             Some(sized_file) => sized_file.size,
-            None => 0
+            None => Cache::get_file_size_from_metadata(&path).unwrap_or(0)
         };
 
         let access_count: usize = self.access_count_map.get(path).unwrap_or(&1).clone();
@@ -350,9 +358,9 @@ impl Cache {
                 return Some(RespondableFile::from(cache_file));
             }
         }
-
+        // TODO Consider if I should have a check step that just checks if the file will pass the tests, then another step that just inserts it.
         // If the file can't be immediately accessed, try to get it from the FS.
-        self.check_for_insertion(pathbuf).ok()
+        self.try_insert(pathbuf).ok()
     }
 
 
@@ -675,7 +683,7 @@ mod tests {
 
         // expect the cache to get the item from the FS.
         assert_eq!(
-            cache.check_for_insertion(path_10m),
+            cache.try_insert(path_10m),
             Ok(RespondableFile::from(named_file))
         );
     }
@@ -694,104 +702,81 @@ mod tests {
         let cached_file_5m = CachedFile::open(path_5m.clone()).unwrap();
         let cached_file_1m = CachedFile::open(path_1m.clone()).unwrap();
 
-
         let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
-        cache.increment_access_count(&path_5m);
+
         assert_eq!(
-            cache.check_for_insertion(path_5m.clone()),
+            cache.try_insert(path_5m.clone()),
             Ok(RespondableFile::from(cached_file_5m))
         );
-        cache.increment_access_count(&path_1m); // increment the access count, causing it to have a higher priority the next time it tries to be stored.
         assert_eq!(
-            cache.check_for_insertion(path_1m.clone() ),
+            cache.try_insert(path_1m.clone() ),
             Ok(RespondableFile::from(named_file_1m))
         );
-        cache.increment_access_count(&path_1m);
         assert_eq!(
-            cache.check_for_insertion( path_1m.clone() ),
+            cache.try_insert( path_1m.clone() ),
             Ok(RespondableFile::from(named_file_1m_2))
         );
-        cache.increment_access_count(&path_1m);
         assert_eq!(
-            cache.check_for_insertion( path_1m.clone() ),
+            cache.try_insert( path_1m.clone() ),
             Ok(RespondableFile::from(cached_file_1m))
         );
     }
 
 
 
-//
-//    #[test]
-//    fn new_file_replaces_lowest_priority_file() {
-//        let temp_dir = TempDir::new(DIR_TEST).unwrap();
-//        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-//        let path_2m = create_test_file(&temp_dir, MEG2, FILE_MEG2);
-//        //        let path_3m = create_test_file(&temp_dir, MEG3, FILE_MEG3);
-//        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
-//        //        let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
-//
-//        let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
-//
-//        cache.increment_access_count(&path_5m);
-//        assert_eq!(
-//            cache.try_store(
-//                path_5m.clone(),
-//                Arc::new(SizedFile::open(path_5m.clone()).unwrap()),
-//            ),
-//            Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
-//        );
-//        cache.update_stats(&path_5m);
-//
-//
-//        cache.increment_access_count(&path_2m);
-//        assert_eq!(
-//            cache.try_store(
-//                path_2m.clone(),
-//                Arc::new(SizedFile::open(path_2m.clone()).unwrap()),
-//            ),
-//            Ok(CacheInvalidationSuccess::InsertedFileIntoAvailableSpace)
-//        );
-//        cache.update_stats(&path_2m);
-//
-//
-//        // The cache will not accept the 1 meg file because sqrt(2)_size * 1_access is greater than sqrt(1)_size * 1_access
-//        cache.increment_access_count(&path_1m);
-//        assert_eq!(
-//            cache.try_store(
-//                path_1m.clone(),
-//                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
-//            ),
-//            Err(CacheInvalidationError::NewPriorityIsNotHighEnough)
-//        );
-//        cache.update_stats(&path_1m);
-//
-//
-//        // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
-//        // file is less than (sqrt(1)_size * 2_access) for the new file.
-//        cache.increment_access_count(&path_1m);
-//        assert_eq!(
-//            cache.try_store(
-//                path_1m.clone(),
-//                Arc::new(SizedFile::open(path_1m.clone()).unwrap()),
-//            ),
-//            Ok(CacheInvalidationSuccess::ReplacedFile)
-//        );
-//        cache.update_stats(&path_1m);
-//
-//
-//        if let None = cache.get_from_cache(&path_1m) {
-//            assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
-//        }
-//
-//        // Get directly from the cache, no FS involved.
-//        if let None = cache.get_from_cache(&path_5m) {
-//            assert_eq!(&path_5m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
-//            // If this has failed, the cache removed the wrong file, implying the ordering of
-//            // priorities is wrong. It should remove the path_2m file instead.
-//        }
-//
-//        if let Some(_) = cache.get_from_cache(&path_2m) {
-//            assert_eq!(&path_2m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
-//        }
-//    }
+
+    #[test]
+    fn new_file_replaces_lowest_priority_file() {
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
+        let path_2m = create_test_file(&temp_dir, MEG2, FILE_MEG2);
+        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
+
+
+        let cached_file_5m = CachedFile::open(path_5m.clone()).unwrap();
+        let cached_file_2m = CachedFile::open(path_2m.clone()).unwrap();
+        let cached_file_1m = CachedFile::open(path_1m.clone()).unwrap();
+
+        let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
+
+        let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
+
+        assert_eq!(
+            cache.get_or_cache(path_5m.clone() ),
+            Some(RespondableFile::from(cached_file_5m))
+        );
+
+        assert_eq!(
+            cache.get_or_cache( path_2m.clone()),
+            Some(RespondableFile::from(cached_file_2m))
+        );
+
+        assert_eq!(
+            cache.get_or_cache( path_1m.clone() ),
+            Some(RespondableFile::from(named_file_1m))
+        );
+
+        // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
+        // file is less than (sqrt(1)_size * 2_access) for the new file.
+        assert_eq!(
+            cache.get_or_cache(path_1m.clone(), ),
+            Some(RespondableFile::from(cached_file_1m))
+        );
+
+
+        if let None = cache.get_from_cache(&path_1m) {
+            assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+        }
+
+        // Get directly from the cache, no FS involved.
+        if let None = cache.get_from_cache(&path_5m) {
+            assert_eq!(&path_5m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+            // If this has failed, the cache removed the wrong file, implying the ordering of
+            // priorities is wrong. It should remove the path_2m file instead.
+        }
+
+        if let Some(_) = cache.get_from_cache(&path_2m) {
+            assert_eq!(&path_2m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+        }
+    }
 }
