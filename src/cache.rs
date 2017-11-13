@@ -281,7 +281,6 @@ impl Cache {
         for file_key in file_paths_to_remove {
             // The file was accessed with this key earlier when sorting priorities.
             // Unwrapping should be safe.
-            println!("trying to remove file_key: {:?}", file_key);
             let sized_file = self.file_map.remove(&file_key).unwrap();
             let _ = self.file_stats_map.remove(&file_key).unwrap();
 
