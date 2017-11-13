@@ -7,7 +7,7 @@ use std::fs::Metadata;
 use std::fs;
 
 use cached_file::CachedFile;
-use cached_file::RespondableFile;
+use cached_file::ResponderFile;
 
 use in_memory_file::InMemoryFile;
 use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
@@ -103,7 +103,7 @@ impl Cache {
     /// also acts as a key for the file in the cache.
     /// The path will be used to find a cached file in the cache or find a file in the filesystem if
     /// an entry in the cache doesn't exist.
-    pub fn get(&mut self, pathbuf: PathBuf) -> Option<RespondableFile> {
+    pub fn get(&mut self, pathbuf: PathBuf) -> Option<ResponderFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
         {
@@ -111,7 +111,7 @@ impl Cache {
                 debug!("Cache hit for file: {:?}", pathbuf);
                 self.increment_access_count(&pathbuf); // File is in the cache, increment the count
                 self.update_stats(&pathbuf);
-                return Some(RespondableFile::from(cache_file));
+                return Some(ResponderFile::from(cache_file));
             }
         }
         // TODO Consider if I should have a check step that just checks if the file will pass the tests, then another step that just inserts it.
@@ -232,7 +232,7 @@ impl Cache {
     /// look up the location of the file in the filesystem if the file is not in the cache.
     ///
     ///
-    fn try_insert(&mut self, path: PathBuf) -> Result< RespondableFile, CacheInvalidationError> {
+    fn try_insert(&mut self, path: PathBuf) -> Result< ResponderFile, CacheInvalidationError> {
 
         let size = Cache::get_file_size_from_metadata(&path)?;
         // If the FS can read metadata for a file, then the file exists, and it should be safe to increment
@@ -251,7 +251,7 @@ impl Cache {
 
             debug!("File does not fit size constraints of the cache.");
             match NamedFile::open(path) {
-                Ok(named_file) => return Ok(RespondableFile::from(named_file)),
+                Ok(named_file) => return Ok(ResponderFile::from(named_file)),
                 Err(_) => return Err(CacheInvalidationError::InvalidPath)
             }
 
@@ -266,7 +266,7 @@ impl Cache {
                         path: path.clone(),
                         file: arc_file
                     };
-                    return Ok(RespondableFile::from(cached_file))
+                    return Ok(ResponderFile::from(cached_file))
                 }
                 Err(_) => {
                     return Err(CacheInvalidationError::InvalidPath)
@@ -294,7 +294,7 @@ impl Cache {
                                 path,
                                 file: arc_file
                             };
-                            return Ok(RespondableFile::from(cached_file))
+                            return Ok(ResponderFile::from(cached_file))
                         }
                         Err(_) => {
                             // The insertion failed, so the removed files need to be re-added to the
@@ -312,7 +312,7 @@ impl Cache {
                     // into memory, and then copying it yet again when it is attached to the body of the
                     // response, use a NamedFile instead.
                     match NamedFile::open(path) {
-                        Ok(named_file) => Ok(RespondableFile::from(named_file)),
+                        Ok(named_file) => Ok(ResponderFile::from(named_file)),
                         Err(_) => Err(CacheInvalidationError::InvalidPath)
                     }
                 }
@@ -530,18 +530,17 @@ mod tests {
 
 
     // Standardize the way a file is used in these tests.
-    impl RespondableFile {
+    impl ResponderFile {
         fn dummy_write(self) {
-            let either = self;
-            match either.0 {
-                Left(cached_file) => {
+            match self {
+                ResponderFile::Cached(cached_file) => {
                     let file: *const InMemoryFile = Arc::into_raw(cached_file.file);
                     unsafe {
                         let _ = (*file).bytes.clone();
                         let _ = Arc::from_raw(file); // Prevent dangling pointer?
                     }
                 }
-                Right(mut named_file) => {
+                ResponderFile::FileSystem(mut named_file) => {
                     let mut v :Vec<u8> = Vec::new();
                     let _ = named_file.read_to_end(&mut v).unwrap();
                 }
@@ -727,7 +726,7 @@ mod tests {
         }
 
         b.iter(|| {
-            let cached_file: RespondableFile = cache.get(path_5m.clone()).unwrap();
+            let cached_file: ResponderFile = cache.get(path_5m.clone()).unwrap();
             // Mimic what is done when the response body is set.
             cached_file.dummy_write()
         });
@@ -761,7 +760,7 @@ mod tests {
         // expect the cache to get the item from the FS.
         assert_eq!(
             cache.try_insert(path_10m),
-            Ok(RespondableFile::from(named_file))
+            Ok(ResponderFile::from(named_file))
         );
     }
 
@@ -783,19 +782,19 @@ mod tests {
 
         assert_eq!(
             cache.try_insert(path_5m.clone()),
-            Ok(RespondableFile::from(cached_file_5m))
+            Ok(ResponderFile::from(cached_file_5m))
         );
         assert_eq!(
             cache.try_insert(path_1m.clone() ),
-            Ok(RespondableFile::from(named_file_1m))
+            Ok(ResponderFile::from(named_file_1m))
         );
         assert_eq!(
             cache.try_insert( path_1m.clone() ),
-            Ok(RespondableFile::from(named_file_1m_2))
+            Ok(ResponderFile::from(named_file_1m_2))
         );
         assert_eq!(
             cache.try_insert( path_1m.clone() ),
-            Ok(RespondableFile::from(cached_file_1m))
+            Ok(ResponderFile::from(cached_file_1m))
         );
     }
 
@@ -821,26 +820,26 @@ mod tests {
         println!("1:\n{:#?}", cache);
         assert_eq!(
             cache.get(path_5m.clone() ),
-            Some(RespondableFile::from(cached_file_5m))
+            Some(ResponderFile::from(cached_file_5m))
         );
 
         println!("2:\n{:#?}", cache);
         assert_eq!(
             cache.get( path_2m.clone()),
-            Some(RespondableFile::from(cached_file_2m))
+            Some(ResponderFile::from(cached_file_2m))
         );
 
         println!("3:\n{:#?}", cache);
         assert_eq!(
             cache.get( path_1m.clone() ),
-            Some(RespondableFile::from(named_file_1m))
+            Some(ResponderFile::from(named_file_1m))
         );
         println!("4:\n{:#?}", cache);
         // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
         // file is less than (sqrt(1)_size * 2_access) for the new file.
         assert_eq!(
             cache.get(path_1m.clone(), ),
-            Some(RespondableFile::from(cached_file_1m))
+            Some(ResponderFile::from(cached_file_1m))
         );
 
 
@@ -879,7 +878,7 @@ mod tests {
         // expect the cache to get the item from the FS.
         assert_eq!(
             cache.get(path_5m.clone()),
-            Some(RespondableFile::from(cached_file))
+            Some(ResponderFile::from(cached_file))
         );
 
         cache.remove(&path_5m);
@@ -888,7 +887,7 @@ mod tests {
 
         assert_eq!(
             cache.get(path_5m.clone()),
-            Some(RespondableFile::from(named_file)) // The named file indicates that the file was removed from the cache.
+            Some(ResponderFile::from(named_file)) // The named file indicates that the file was removed from the cache.
         );
     }
 
@@ -903,11 +902,14 @@ mod tests {
 
         assert_eq!(
             cache.get(path_5m.clone()),
-            Some(RespondableFile::from(cached_file))
+            Some(ResponderFile::from(cached_file))
         );
 
         assert_eq!(
-            cache.get(path_5m.clone()).unwrap().0.left().unwrap().file.size,
+            match cache.get(path_5m.clone()).unwrap() {
+                ResponderFile::Cached(c) => c.file.size,
+                ResponderFile::FileSystem(_) => unreachable!()
+            },
             MEG5
         );
 
@@ -917,7 +919,10 @@ mod tests {
         cache.refresh(&path_5m);
 
         assert_eq!(
-            cache.get(path_of_file_with_10mb_but_path_name_5m.clone()).unwrap().0.left().unwrap().file.size,
+            match cache.get(path_of_file_with_10mb_but_path_name_5m.clone()).unwrap() {
+                ResponderFile::Cached(c) => c.file.size,
+                ResponderFile::FileSystem(_) => unreachable!()
+            },
             MEG10
         )
 

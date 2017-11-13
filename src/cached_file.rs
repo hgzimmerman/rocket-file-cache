@@ -70,62 +70,59 @@ impl Responder<'static> for CachedFile {
 }
 
 #[derive(Debug)]
-pub struct RespondableFile(pub(crate) Either<CachedFile,NamedFile>);
+pub enum ResponderFile {
+    Cached(CachedFile),
+    FileSystem(NamedFile)
+}
+
+impl From<CachedFile> for ResponderFile {
+    fn from(cached_file: CachedFile) -> Self {
+        ResponderFile::Cached(cached_file)
+    }
+}
+
+impl From<NamedFile> for ResponderFile {
+    fn from(named_file: NamedFile) -> Self {
+        ResponderFile::FileSystem(named_file)
+    }
+}
+
+impl Responder<'static> for ResponderFile {
+    fn respond_to(self, request: &Request) -> result::Result<Response<'static>, Status> {
+
+        match self {
+            ResponderFile::Cached(cached_file) => cached_file.respond_to(request),
+            ResponderFile::FileSystem(named_file) => named_file.respond_to(request)
+        }
+    }
+}
 
 
-impl PartialEq for RespondableFile {
-    fn eq(&self, other: &RespondableFile) -> bool {
-        match self.0 {
-            Left(ref lhs_cached_file) => {
-                match other.0 {
-                    Left(ref rhs_cached_file) => {
-                        rhs_cached_file == lhs_cached_file
+impl PartialEq for ResponderFile {
+    fn eq(&self, other: &ResponderFile) -> bool {
+        match *self {
+            ResponderFile::Cached(ref lhs_cached_file) => {
+                match *other {
+                    ResponderFile::Cached(ref rhs_cached_file) => {
+                        *rhs_cached_file == *lhs_cached_file
                     }
-                    Right(_) => {
+                    ResponderFile::FileSystem(_) => {
                         false
                     }
                 }
             }
-            Right(ref lhs_named_file) => {
-                match other.0 {
-                    Left(_) => {
+            ResponderFile::FileSystem(ref lhs_named_file) => {
+                match *other {
+                    ResponderFile::Cached(_) => {
                         false
                     }
-                    Right(ref rhs_named_file) => {
+                    ResponderFile::FileSystem(ref rhs_named_file) => {
                         // Since all we have is a file handle this will settle for just comparing the paths for now
                         *lhs_named_file.path() == *rhs_named_file.path()
                     }
                 }
             }
         }
-
-    }
-}
-
-impl From<CachedFile> for RespondableFile {
-    fn from(cached_file: CachedFile) -> Self {
-        RespondableFile(Left(cached_file))
-    }
-}
-
-impl From<NamedFile> for RespondableFile {
-    fn from(named_file: NamedFile) -> Self {
-        RespondableFile(Right(named_file))
-    }
-}
-
-impl Responder<'static> for RespondableFile {
-    fn respond_to(self, request: &Request) -> result::Result<Response<'static>, Status> {
-
-        match self.0 {
-            Left(cached_file) => {
-                cached_file.respond_to(request)
-            }
-            Right(named_file) => {
-                named_file.respond_to(request)
-            }
-        }
-
 
     }
 }
