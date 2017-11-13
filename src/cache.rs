@@ -845,7 +845,7 @@ mod tests {
 
     #[test]
     fn remove_file() {
-        let mut cache: Cache = Cache::new(MEG1 * 10); // Cache can hold only 8Mb
+        let mut cache: Cache = Cache::new(MEG1 * 10);
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
         let path_10m: PathBuf = create_test_file(&temp_dir, MEG10, FILE_MEG10);
@@ -871,4 +871,37 @@ mod tests {
             Some(RespondableFile::from(named_file)) // The named file indicates that the file was removed from the cache.
         );
     }
+
+    #[test]
+    fn refresh_file() {
+        let mut cache: Cache = Cache::new(MEG1 * 10);
+
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
+
+        let cached_file: CachedFile = CachedFile::open(path_5m.clone()).unwrap();
+
+        assert_eq!(
+            cache.get(path_5m.clone()),
+            Some(RespondableFile::from(cached_file))
+        );
+
+        assert_eq!(
+            cache.get(path_5m.clone()).unwrap().0.left().unwrap().file.size,
+            MEG5
+        );
+
+        let path_of_file_with_10mb_but_path_name_5m = create_test_file(&temp_dir, MEG10, FILE_MEG5);
+        let cached_file_big: CachedFile = CachedFile::open(path_of_file_with_10mb_but_path_name_5m.clone() ).unwrap();
+
+        cache.refresh(&path_5m);
+
+        assert_eq!(
+            cache.get(path_of_file_with_10mb_but_path_name_5m.clone()).unwrap().0.left().unwrap().file.size,
+            MEG10
+        )
+
+
+    }
+
 }
