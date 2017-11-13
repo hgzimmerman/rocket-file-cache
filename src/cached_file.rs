@@ -47,8 +47,6 @@ impl CachedFile {
 }
 
 
-
-
 /// Streams the cached file to the client. Sets or overrides the Content-Type in
 /// the response according to the file's extension if the extension is recognized.
 ///
