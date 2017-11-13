@@ -369,7 +369,7 @@ impl Cache {
     // This will also need to update the file_stats entry as well to reflect the new size of the file.
     // If the file size is drastically reduced, no further action needs to be taken, as the next
     // insertion attempt for an alternative file will remove the file anyway.
-    pub fn refresh_file(&mut self, pathbuf: &PathBuf) -> bool {
+    pub fn refresh(&mut self, pathbuf: &PathBuf) -> bool {
         // Check if the file exists in the cache
 
         let mut is_ok_to_refresh: bool = false;
@@ -405,7 +405,7 @@ impl Cache {
 
 
     // TODO, add checks and return an enum indicating what happened.
-    pub fn remove_file(&mut self, pathbuf: &PathBuf) {
+    pub fn remove(&mut self, pathbuf: &PathBuf) {
         self.file_stats_map.remove(pathbuf);
         self.file_map.remove(pathbuf);
         let entry = self.access_count_map.entry(pathbuf.clone()).or_insert(
@@ -838,5 +838,37 @@ mod tests {
         if let Some(_) = cache.get_from_cache(&path_2m) {
             assert_eq!(&path_2m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
         }
+    }
+
+
+
+
+    #[test]
+    fn remove_file() {
+        let mut cache: Cache = Cache::new(MEG1 * 10); // Cache can hold only 8Mb
+        let temp_dir = TempDir::new(DIR_TEST).unwrap();
+        let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
+        let path_10m: PathBuf = create_test_file(&temp_dir, MEG10, FILE_MEG10);
+
+        let named_file: NamedFile = NamedFile::open(path_5m.clone()).unwrap();
+        let cached_file: CachedFile = CachedFile::open(path_5m.clone()).unwrap();
+
+
+
+
+        // expect the cache to get the item from the FS.
+        assert_eq!(
+            cache.get(path_5m.clone()),
+            Some(RespondableFile::from(cached_file))
+        );
+
+        cache.remove(&path_5m);
+
+        cache.get(path_10m.clone()); // add a bigger file to the cache
+
+        assert_eq!(
+            cache.get(path_5m.clone()),
+            Some(RespondableFile::from(named_file)) // The named file indicates that the file was removed from the cache.
+        );
     }
 }
