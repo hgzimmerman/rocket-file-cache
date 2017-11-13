@@ -9,22 +9,22 @@ use std::io;
 use either::*;
 use rocket::response::NamedFile;
 
-use sized_file::SizedFile;
+use in_memory_file::InMemoryFile;
 
 
-
+/// A wrapper around an in-memory file.
 /// The structure that is returned when a request to the cache is made.
 /// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CachedFile {
     pub(crate) path: PathBuf,
-    pub(crate) file: Arc<SizedFile>,
+    pub(crate) file: Arc<InMemoryFile>,
 }
 
 impl CachedFile {
     /// Reads the file at the path into a CachedFile.
     pub fn open(path: PathBuf) -> io::Result<CachedFile> {
-        let sized_file: SizedFile = SizedFile::open(&path)?;
+        let sized_file: InMemoryFile = InMemoryFile::open(&path)?;
         Ok(CachedFile {
             path,
             file: Arc::new(sized_file)
@@ -38,13 +38,15 @@ impl CachedFile {
     /// This prevents copying the file, leading to a significant speedup.
     #[inline]
     pub(crate) fn set_response_body(self, response: &mut Response) {
-        let file: *const SizedFile = Arc::into_raw(self.file);
+        let file: *const InMemoryFile = Arc::into_raw(self.file);
         unsafe {
             response.set_streamed_body((*file).bytes.as_slice());
             let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
         }
     }
 }
+
+
 
 
 /// Streams the cached file to the client. Sets or overrides the Content-Type in
@@ -79,8 +81,7 @@ impl PartialEq for RespondableFile {
             Left(ref lhs_cached_file) => {
                 match other.0 {
                     Left(ref rhs_cached_file) => {
-                        //TODO This is a VERY lazy implementation, does not currently check if all bytes are the same.
-                        true
+                        rhs_cached_file == lhs_cached_file
                     }
                     Right(_) => {
                         false
@@ -93,8 +94,8 @@ impl PartialEq for RespondableFile {
                         false
                     }
                     Right(ref rhs_named_file) => {
-                        //TODO This is a VERY lazy implementation, does not currently check if all bytes are the same.
-                        true
+                        // Since all we have is a file handle this will settle for just comparing the paths for now
+                        *lhs_named_file.path() == *rhs_named_file.path()
                     }
                 }
             }

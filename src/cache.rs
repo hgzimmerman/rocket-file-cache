@@ -9,7 +9,7 @@ use std::fs;
 use cached_file::CachedFile;
 use cached_file::RespondableFile;
 
-use sized_file::SizedFile;
+use in_memory_file::InMemoryFile;
 use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
 
 
@@ -71,7 +71,7 @@ pub struct Cache {
     pub(crate) min_file_size: usize, // The minimum size file that can be added to the cache
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
-    pub(crate) file_map: HashMap<PathBuf, Arc<SizedFile>>, // Holds the files that the cache is caching
+    pub(crate) file_map: HashMap<PathBuf, Arc<InMemoryFile>>, // Holds the files that the cache is caching
     pub(crate) file_stats_map: HashMap<PathBuf, FileStats>, // Holds stats for only the files in the file map.
     pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
@@ -170,9 +170,9 @@ impl Cache {
             && size < self.size_limit {
 
             debug!("Cache has room for the file.");
-            match SizedFile::open(path.as_path()) {
+            match InMemoryFile::open(path.as_path()) {
                 Ok(file) => {
-                    let arc_file: Arc<SizedFile> = Arc::new(file);
+                    let arc_file: Arc<InMemoryFile> = Arc::new(file);
                     self.file_map.insert(path.clone(), arc_file.clone());
                     let cached_file = CachedFile {
                         path: path.clone(),
@@ -198,9 +198,9 @@ impl Cache {
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
                 Ok(removed_files) => {
                     debug!("Made room for new file");
-                    match SizedFile::open(path.as_path()) {
+                    match InMemoryFile::open(path.as_path()) {
                         Ok(file) => {
-                            let arc_file: Arc<SizedFile> = Arc::new(file);
+                            let arc_file: Arc<InMemoryFile> = Arc::new(file);
                             self.file_map.insert(path.clone(), arc_file.clone());
                             let cached_file = CachedFile {
                                 path,
@@ -281,12 +281,12 @@ impl Cache {
         for file_key in file_paths_to_remove {
             // The file was accessed with this key earlier when sorting priorities.
             // Unwrapping should be safe.
-            let sized_file = self.file_map.remove(&file_key).unwrap();
+            let in_memory_file = self.file_map.remove(&file_key).unwrap();
             let _ = self.file_stats_map.remove(&file_key).unwrap();
 
             let removed_cached_file = CachedFile {
                 path: file_key.clone(),
-                file: sized_file
+                file: in_memory_file
             };
             return_vec.push(removed_cached_file);
         }
@@ -296,10 +296,10 @@ impl Cache {
     ///Helper function that gets the file from the cache if it exists there.
     fn get_from_cache(&mut self, path: &PathBuf) -> Option<CachedFile> {
         match self.file_map.get(path) {
-            Some(sized_file) => {
+            Some(in_memory_file) => {
                 Some(CachedFile {
                     path: path.clone(),
-                    file: sized_file.clone(),
+                    file: in_memory_file.clone(),
                 })
             }
             None => None, // File not found
@@ -321,9 +321,10 @@ impl Cache {
     }
 
 
+    /// Update the priority score
     fn update_stats(&mut self, path: &PathBuf) {
         let size: usize = match self.file_map.get(path){
-            Some(sized_file) => sized_file.size,
+            Some(in_memory_file) => in_memory_file.size,
             None => Cache::get_file_size_from_metadata(&path).unwrap_or(0)
         };
 
@@ -336,6 +337,7 @@ impl Cache {
                 priority: 0
             }
         );
+        stats.size = size;
         stats.priority = (self.priority_function)(stats.access_count, stats.size); // update the priority score.
     }
 
@@ -369,19 +371,21 @@ impl Cache {
     // If the file size is drastically reduced, no further action needs to be taken, as the next
     // insertion attempt for an alternative file will remove the file anyway.
     pub fn refresh(&mut self, pathbuf: &PathBuf) -> bool {
-        // Check if the file exists in the cache
 
         let mut is_ok_to_refresh: bool = false;
-        if let Some(existing_file) = self.file_map.get(pathbuf)  {
+
+        // Check if the file exists in the cache
+        //TODO change these get()s to contains()
+        if let Some(_existing_file) = self.file_map.get(pathbuf)  {
             // See if the new file exists.
             let path_string: String = match pathbuf.clone().to_str() {
                 Some(s) => String::from(s),
                 None => return false
             };
             if let Ok(metadata) = fs::metadata(path_string.as_str()) {
-                if metadata.is_file(){
+                if metadata.is_file() {
                     // If the stats for the old file exist
-                    if let Some(existing_stats) = self.file_stats_map.get(pathbuf) {
+                    if let Some(_existing_stats) = self.file_stats_map.get(pathbuf) {
                         is_ok_to_refresh = true;
                     }
                 }
@@ -389,7 +393,8 @@ impl Cache {
         }
 
         if is_ok_to_refresh {
-            if let Ok(new_file) = SizedFile::open(pathbuf.clone()) {
+            if let Ok(new_file) = InMemoryFile::open(pathbuf.clone()) {
+                debug!("Refreshing file: {:?}", pathbuf);
                 {
                     self.file_map.remove(pathbuf);
                     self.file_map.insert(pathbuf.clone(), Arc::new(new_file));
@@ -512,7 +517,7 @@ mod tests {
             let either = self;
             match either.0 {
                 Left(cached_file) => {
-                    let file: *const SizedFile = Arc::into_raw(cached_file.file);
+                    let file: *const InMemoryFile = Arc::into_raw(cached_file.file);
                     unsafe {
                         let _ = (*file).bytes.clone();
                         let _ = Arc::from_raw(file); // Prevent dangling pointer?
@@ -555,7 +560,6 @@ mod tests {
     fn named_file_read_10mb(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
-        use std;
         b.iter(|| {
             let mut named_file = NamedFile::open(path_10m.clone()).unwrap();
             let mut v :Vec<u8> = Vec::new();
@@ -698,7 +702,7 @@ mod tests {
         // Add 1024 5kib files to the cache.
         for i in 0..1024 {
             let path = create_test_file(&temp_dir, 1024 * 5, format!("{}_5kib.txt", i).as_str());
-            // make sure that the file has a high priority.
+            // make sure that the file has a high priority by accessing it many times
             for _ in 0..1000 {
                 cache.get(path.clone());
             }
@@ -712,15 +716,14 @@ mod tests {
     }
 
 
-    /// A sized file read is twice as bad as a Named file due to the ARC::new()
     #[bench]
-    fn sized_file_read_10mb(b: &mut Bencher) {
+    fn in_memory_file_read_10mb(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         b.iter(|| {
-            let sized_file = Arc::new(SizedFile::open(path_10m.clone()).unwrap());
-            let file: *const SizedFile = Arc::into_raw(sized_file);
+            let in_memory_file = Arc::new(InMemoryFile::open(path_10m.clone()).unwrap());
+            let file: *const InMemoryFile = Arc::into_raw(in_memory_file);
             unsafe {
                 let _ = (*file).bytes.clone();
                 let _ = Arc::from_raw(file);
@@ -891,7 +894,7 @@ mod tests {
         );
 
         let path_of_file_with_10mb_but_path_name_5m = create_test_file(&temp_dir, MEG10, FILE_MEG5);
-        let cached_file_big: CachedFile = CachedFile::open(path_of_file_with_10mb_but_path_name_5m.clone() ).unwrap();
+        let _cached_file_big: CachedFile = CachedFile::open(path_of_file_with_10mb_but_path_name_5m.clone() ).unwrap();
 
         cache.refresh(&path_5m);
 

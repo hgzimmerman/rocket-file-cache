@@ -3,7 +3,6 @@ name = "rocket-file-cache"
 version = "0.4.0"
 authors = ["Henry Zimmerman <zimhen7@gmail.com>"]
 exclude = [
-    "test/*",
 ]
 
 description = "An in-memory file cache for the Rocket web framework."
