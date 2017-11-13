@@ -503,7 +503,6 @@ mod tests {
     use std::fs::File;
     use rocket::response::NamedFile;
     use std::io::Read;
-    use either::*;
 
 
     const MEG1: usize = 1024 * 1024;

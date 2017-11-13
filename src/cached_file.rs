@@ -6,7 +6,6 @@ use std::result;
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::io;
-use either::*;
 use rocket::response::NamedFile;
 
 use in_memory_file::InMemoryFile;
