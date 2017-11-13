@@ -23,7 +23,7 @@ fn main() {
 #[get("/<file..>")]
 fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<CachedFile> {
     let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
-    cache.lock().unwrap().get_or_cache(pathbuf)
+    cache.lock().unwrap().get(pathbuf)
 }
 ```
 
@@ -41,18 +41,19 @@ The bench tests try to get the file from whatever source, and read it once into 
 The misses measure the time it takes for the cache to realize that the file is not stored, and to read the file from disk.
 Running the unscientific bench tests on an AWS EC2 t2 micro instance (82 MB/s HDD) returned these results:
 ```
-test cache::tests::cache_get_10mb                       ... bench:   3,762,150 ns/iter (+/- 330,904)
-test cache::tests::cache_get_1mb                        ... bench:      79,753 ns/iter (+/- 1,363)
-test cache::tests::cache_get_1mb_from_1000_entry_cache  ... bench:      78,280 ns/iter (+/- 976)
-test cache::tests::cache_get_5mb                        ... bench:   1,724,274 ns/iter (+/- 51,107)
-test cache::tests::cache_miss_10mb                      ... bench:  14,115,702 ns/iter (+/- 885,753)
-test cache::tests::cache_miss_1mb                       ... bench:     893,150 ns/iter (+/- 22,144)
-test cache::tests::cache_miss_1mb_from_1000_entry_cache ... bench:   1,475,091 ns/iter (+/- 19,818)
-test cache::tests::cache_miss_5mb                       ... bench:   4,931,435 ns/iter (+/- 384,645)
-test cache::tests::cache_miss_5mb_from_1000_entry_cache ... bench:   6,500,311 ns/iter (+/- 272,567)
-test cache::tests::named_file_read_10mb                 ... bench:   4,077,586 ns/iter (+/- 671,434)
-test cache::tests::named_file_read_1mb                  ... bench:   1,043,831 ns/iter (+/- 23,470)
-test cache::tests::named_file_read_5mb                  ... bench:   2,388,722 ns/iter (+/- 80,227)
+test cache::tests::cache_get_10mb                       ... bench:   3,886,350 ns/iter (+/- 328,979)
+test cache::tests::cache_get_1mb                        ... bench:      76,307 ns/iter (+/- 4,262)
+test cache::tests::cache_get_1mb_from_1000_entry_cache  ... bench:      74,306 ns/iter (+/- 1,390)
+test cache::tests::cache_get_5mb                        ... bench:   1,715,183 ns/iter (+/- 288,559)
+test cache::tests::cache_miss_10mb                      ... bench:   5,234,225 ns/iter (+/- 526,213)
+test cache::tests::cache_miss_1mb                       ... bench:   1,041,573 ns/iter (+/- 22,910)
+test cache::tests::cache_miss_1mb_from_1000_entry_cache ... bench:      79,631 ns/iter (+/- 2,536)
+test cache::tests::cache_miss_5mb                       ... bench:   3,087,674 ns/iter (+/- 53,189)
+test cache::tests::cache_miss_5mb_from_1000_entry_cache ... bench:   1,738,275 ns/iter (+/- 20,879)
+test cache::tests::named_file_read_10mb                 ... bench:   4,905,043 ns/iter (+/- 844,470)
+test cache::tests::named_file_read_1mb                  ... bench:   1,037,299 ns/iter (+/- 15,554)
+test cache::tests::named_file_read_5mb                  ... bench:   2,358,750 ns/iter (+/- 65,191)
+test cache::tests::sized_file_read_10mb                 ... bench:  14,617,872 ns/iter (+/- 1,524,981)
 ```
 
 It can be seen that on a server with slow disk reads, small file access times are vastly improved versus the disk.
