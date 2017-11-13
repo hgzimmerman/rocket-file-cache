@@ -13,7 +13,7 @@ use in_memory_file::InMemoryFile;
 
 
 /// A wrapper around an in-memory file.
-/// The structure that is returned when a request to the cache is made.
+/// This struct is created when when a request to the cache is made.
 /// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CachedFile {
@@ -45,8 +45,6 @@ impl CachedFile {
         }
     }
 }
-
-
 
 
 /// Streams the cached file to the client. Sets or overrides the Content-Type in

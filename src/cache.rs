@@ -94,8 +94,101 @@ impl Cache {
         }
     }
 
+    /// Either gets the file from the cache if it exists there, gets it from the filesystem and
+    /// tries to cache it, or fails to find the file and returns None.
+    ///
+    /// # Arguments
+    ///
+    /// * `pathbuf` - A pathbuf that represents the path of the file in the filesystem. The pathbuf
+    /// also acts as a key for the file in the cache.
+    /// The path will be used to find a cached file in the cache or find a file in the filesystem if
+    /// an entry in the cache doesn't exist.
+    pub fn get(&mut self, pathbuf: PathBuf) -> Option<RespondableFile> {
+        trace!("{:#?}", self);
+        // First, try to get the file in the cache that corresponds to the desired path.
+        {
+            if let Some(cache_file) = self.get_from_cache(&pathbuf) {
+                debug!("Cache hit for file: {:?}", pathbuf);
+                self.increment_access_count(&pathbuf); // File is in the cache, increment the count
+                self.update_stats(&pathbuf);
+                return Some(RespondableFile::from(cache_file));
+            }
+        }
+        // TODO Consider if I should have a check step that just checks if the file will pass the tests, then another step that just inserts it.
+        // If the file can't be immediately accessed, try to get it from the FS.
+        self.try_insert(pathbuf).ok()
+    }
 
 
+
+
+    /// If the a file has changed on disk, the cache will not automatically know that a change has occurred.
+    ///
+    /// Calling this function will check if the file exists, read the new file into memory,
+    /// replace the old file, and update the priority score to reflect the possibly new size of the
+    /// file.
+    ///
+    ///  # Arguments
+    ///
+    /// * `pathbuf` - A pathbuf that represents the path of the file in the filesystem, and key in the cache.
+    /// The path will be used to find the new file in the filesystem and find the old file to replace in
+    /// the cache.
+    pub fn refresh(&mut self, pathbuf: &PathBuf) -> bool {
+
+        let mut is_ok_to_refresh: bool = false;
+
+        // Check if the file exists in the cache
+        if self.file_map.contains_key(pathbuf)  {
+            // See if the new file exists.
+            let path_string: String = match pathbuf.clone().to_str() {
+                Some(s) => String::from(s),
+                None => return false
+            };
+            if let Ok(metadata) = fs::metadata(path_string.as_str()) {
+                if metadata.is_file() {
+                    // If the stats for the old file exist
+                    if self.file_stats_map.contains_key(pathbuf) {
+                        is_ok_to_refresh = true;
+                    }
+                }
+            };
+        }
+
+        if is_ok_to_refresh {
+            if let Ok(new_file) = InMemoryFile::open(pathbuf.clone()) {
+                debug!("Refreshing file: {:?}", pathbuf);
+                {
+                    self.file_map.remove(pathbuf);
+                    self.file_map.insert(pathbuf.clone(), Arc::new(new_file));
+                }
+
+                self.update_stats(pathbuf)
+
+            }
+        }
+        is_ok_to_refresh
+    }
+
+    // TODO, add checks and return an enum indicating what happened.
+    /// Removes the file from the cache.
+    /// This will not reset the access count, so the next time the file is accessed, it will be added to the cache again.
+    /// The access count will have to be reset separately.
+    ///
+    /// # Arguments
+    ///
+    /// * `pathbuf` - A pathbuf that acts as a key to the file that should be removed from the cache
+    pub fn remove(&mut self, pathbuf: &PathBuf) {
+        self.file_stats_map.remove(pathbuf);
+        self.file_map.remove(pathbuf);
+        let entry = self.access_count_map.entry(pathbuf.clone()).or_insert(
+            0
+        );
+        *entry = 0
+    }
+
+
+    /// Gets the size of the file from the file's metadata.
+    /// This avoids having to read the file into memory in order to get the file size.
     fn get_file_size_from_metadata(path: &PathBuf) -> Result<usize, CacheInvalidationError> {
         let path_string: String = match path.clone().to_str() {
             Some(s) => String::from(s),
@@ -154,8 +247,7 @@ impl Cache {
         let required_space_for_new_file: isize = (self.size_bytes() as isize + size as isize) - self.size_limit as isize;
 
 
-        if size > self.max_file_size
-            || size < self.min_file_size {
+        if size > self.max_file_size || size < self.min_file_size {
 
             debug!("File does not fit size constraints of the cache.");
             match NamedFile::open(path) {
@@ -163,8 +255,7 @@ impl Cache {
                 Err(_) => return Err(CacheInvalidationError::InvalidPath)
             }
 
-        } else if required_space_for_new_file < 0
-            && size < self.size_limit {
+        } else if required_space_for_new_file < 0 && size < self.size_limit {
 
             debug!("Cache has room for the file.");
             match InMemoryFile::open(path.as_path()) {
@@ -318,7 +409,7 @@ impl Cache {
     }
 
 
-    /// Update the priority score
+    /// Update the stats associated with this file.
     fn update_stats(&mut self, path: &PathBuf) {
         let size: usize = match self.file_map.get(path){
             Some(in_memory_file) => in_memory_file.size,
@@ -338,82 +429,11 @@ impl Cache {
         stats.priority = (self.priority_function)(stats.access_count, stats.size); // update the priority score.
     }
 
-    /// Either gets the file from the cache if it exists there, gets it from the filesystem and
-    /// tries to cache it, or fails to find the file and returns None.
-    ///
-    /// # Arguments
-    ///
-    /// * `pathbuf` - A pathbuf that represents the path of the file in the fileserver. The pathbuf
-    /// also acts as a key for the file in the cache.
-    pub fn get(&mut self, pathbuf: PathBuf) -> Option<RespondableFile> {
-        trace!("{:#?}", self);
-        // First, try to get the file in the cache that corresponds to the desired path.
-        {
-            if let Some(cache_file) = self.get_from_cache(&pathbuf) {
-                debug!("Cache hit for file: {:?}", pathbuf);
-                self.increment_access_count(&pathbuf); // File is in the cache, increment the count
-                self.update_stats(&pathbuf);
-                return Some(RespondableFile::from(cache_file));
-            }
-        }
-        // TODO Consider if I should have a check step that just checks if the file will pass the tests, then another step that just inserts it.
-        // If the file can't be immediately accessed, try to get it from the FS.
-        self.try_insert(pathbuf).ok()
-    }
-
-    // TODO make return type an enum indicating why the refresh failed or succeeded.
-    // A user may update a file on the FS that also may be cached in the cache.
-    // This function will change the in-memory representation of the file at the given pathbuf.
-    // This will also need to update the file_stats entry as well to reflect the new size of the file.
-    // If the file size is drastically reduced, no further action needs to be taken, as the next
-    // insertion attempt for an alternative file will remove the file anyway.
-    pub fn refresh(&mut self, pathbuf: &PathBuf) -> bool {
-
-        let mut is_ok_to_refresh: bool = false;
-
-        // Check if the file exists in the cache
-        //TODO change these get()s to contains()
-        if let Some(_existing_file) = self.file_map.get(pathbuf)  {
-            // See if the new file exists.
-            let path_string: String = match pathbuf.clone().to_str() {
-                Some(s) => String::from(s),
-                None => return false
-            };
-            if let Ok(metadata) = fs::metadata(path_string.as_str()) {
-                if metadata.is_file() {
-                    // If the stats for the old file exist
-                    if let Some(_existing_stats) = self.file_stats_map.get(pathbuf) {
-                        is_ok_to_refresh = true;
-                    }
-                }
-            };
-        }
-
-        if is_ok_to_refresh {
-            if let Ok(new_file) = InMemoryFile::open(pathbuf.clone()) {
-                debug!("Refreshing file: {:?}", pathbuf);
-                {
-                    self.file_map.remove(pathbuf);
-                    self.file_map.insert(pathbuf.clone(), Arc::new(new_file));
-                }
-
-                self.update_stats(pathbuf)
-
-            }
-        }
-        is_ok_to_refresh
-    }
 
 
-    // TODO, add checks and return an enum indicating what happened.
-    pub fn remove(&mut self, pathbuf: &PathBuf) {
-        self.file_stats_map.remove(pathbuf);
-        self.file_map.remove(pathbuf);
-        let entry = self.access_count_map.entry(pathbuf.clone()).or_insert(
-            0
-        );
-        *entry = 0
-    }
+
+
+
 
 
     /// Gets a vector of tuples containing the Path, priority score, and size in bytes of all items
@@ -509,6 +529,7 @@ mod tests {
     }
 
 
+    // Standardize the way a file is used in these tests.
     impl RespondableFile {
         fn dummy_write(self) {
             let either = self;
