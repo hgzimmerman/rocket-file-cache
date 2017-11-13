@@ -47,14 +47,11 @@ pub struct FileStats {
 }
 
 /// The Cache holds a number of files whose bytes fit into its size_limit.
-/// The Cache acts as a proxy to the filesystem.
-/// When a request for a file is made, the Cache checks to see if it has a copy of the file.
-/// If it does have a file, it returns an Arc reference to the file in a format that can easily be serialized.
-/// If it doesn't own a copy of the file, it reads the file from the FS and tries to cache it.
-/// If there is room in the Cache, the cache will store the file, otherwise it will increment a
-/// count indicating the number of access attempts for the file.
+/// The Cache acts as a proxy to the filesystem, returning cached files if they are in the cache,
+/// or reading a file directly from the filesystem if the file is not in the cache.
 ///
-/// When the cache is full, each file in the cache will have priority score determined by the priority function.
+/// When the cache is full, each file in the cache will have priority score determined by a provided
+/// priority function.
 /// When a a new file is attempted to be stored, it will calculate the priority of the new score and
 /// compare that against the score of the file with the lowest priority in the cache.
 /// If the new file's priority is higher, then the file in the cache will be removed and replaced with the new file.
