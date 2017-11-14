@@ -43,9 +43,12 @@ pub struct FileStats {
 ///
 /// When the cache is full, each file in the cache will have priority score determined by a provided
 /// priority function.
+/// When a call to `get()` is made, an access counter for the file in question is incremented,
+/// usually increasing the priority score of the file.
 /// When a a new file is attempted to be stored, it will calculate the priority of the new score and
 /// compare that against the score of the file with the lowest priority in the cache.
-/// If the new file's priority is higher, then the file in the cache will be removed and replaced with the new file.
+/// If the new file's priority is higher, then the file in the cache will be removed and replaced
+/// with the new file.
 /// If removing the first file doesn't free up enough space for the new file, then the file with the
 /// next lowest priority will have its priority added to the other removed file's and the aggregate
 /// cached file's priority will be tested against the new file's.
@@ -55,7 +58,8 @@ pub struct FileStats {
 /// in which case, the new file isn't inserted.
 #[derive(Debug)]
 pub struct Cache {
-    pub size_limit: usize, // The number of bytes the file_map should ever hold.
+    /// The number of bytes the file_map should be able hold at once.
+    pub size_limit: usize,
     pub(crate) min_file_size: usize, // The minimum size file that can be added to the cache
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
@@ -121,11 +125,11 @@ impl Cache {
     /// fn files(file: PathBuf, cache: State<Mutex<Cache>> ) -> Option<ResponderFile> {
     ///     let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
     ///
-    ///     // Try to lock the cache in order to use it.
+    ///     // Try to lock the mutex in order to use the cache.
     ///     match cache.try_lock() {
     ///         Ok(mut cache) => cache.get(&pathbuf),
     ///         Err(_) => {
-    ///             // Fall back to using the FS if another thread owns the lock.
+    ///             // Fall back to using the filesystem if another thread owns the lock.
     ///             match NamedFile::open(pathbuf).ok() {
     ///                 Some(file) => Some(ResponderFile::from(file)),
     ///                 None => None
@@ -146,7 +150,6 @@ impl Cache {
                 return Some(ResponderFile::from(cache_file));
             }
         }
-        // TODO Consider if I should have a check step that just checks if the file will pass the tests, then another step that just inserts it.
         // If the file can't be immediately accessed, try to get it from the FS.
         self.try_insert(pathbuf.clone()).ok()
     }
@@ -160,8 +163,9 @@ impl Cache {
     ///
     /// # Arguments
     ///
-    /// * `pathbuf` - A pathbuf that represents the path of the file in the filesystem, and key in the cache.
-    /// The path will be used to find the new file in the filesystem and find the old file to replace in
+    /// * `pathbuf` - A pathbuf that represents the path of the file in the filesystem, and key to
+    /// the file in the cache.
+    /// The path will be used to find the new file in the filesystem and to find the old file to replace in
     /// the cache.
     pub fn refresh(&mut self, pathbuf: &PathBuf) -> bool {
 
@@ -206,7 +210,7 @@ impl Cache {
     ///
     /// # Arguments
     ///
-    /// * `pathbuf` - A pathbuf that acts as a key to the file that should be removed from the cache
+    /// * `pathbuf` - A pathbuf that acts as a key to look up the file that should be removed from the cache.
     ///
     /// # Example
     ///
@@ -306,7 +310,7 @@ impl Cache {
     /// cache.get(&pathbuf);
     /// cache.get(&other_pathbuf);
     /// // Reduce all access counts by half,
-    /// // allowing newer content to enter the cache more easily.
+    /// // allowing newer files to enter the cache more easily.
     /// cache.alter_all_access_counts(| x | { x / 2 });
     /// ```
     ///

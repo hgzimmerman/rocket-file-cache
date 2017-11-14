@@ -13,7 +13,7 @@ fn files(file: PathBuf) -> Option<NamedFile> {
 Can be replaced with:
 ```rust
 fn main() {
-    let cache: Mutex<Cache> = Mutex::new(Cache::new(1024 * 1024 * 10)); // 10 megabytes
+    let cache: Mutex<Cache> = Mutex::new(Cache::new(1024 * 1024 * 40)); // 40 megabytes
     rocket::ignite()
         .manage(cache)
         .mount("/", routes![files])
@@ -32,11 +32,9 @@ fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<CachedFile> {
 Rocket File Cache keeps a set of frequently accessed files in memory so your webserver won't have to wait for your disk to read the files.
 This should improve latency and throughput on systems that are bottlenecked on disk I/O.
 
-Because the cache needs to be hidden behind a Mutex, only one thread can get access at a time.
-This will have a negative performance impact in cases where the webserver is handling enough traffic to constantly cause lock contention.
+In environments where the files in question can all fit comfortably into the cache, and the files themselves are small, it has been observed that webpage load times have seen > 3x improvements.
 
-This performance hit can be mitigated by using a pool of caches at the expense of increased memory use,
-or by immediately falling back to getting files from the filesystem if a lock can't be gained.
+Rocket File Cache has not been tested yet in an environment where large files are fighting to be kept in the cache, but small improvements in performance should be expected there.
 
 ## Performance
 
@@ -63,6 +61,11 @@ It can be seen that on a server with slow disk reads, small file access times ar
 Larger files also seem to benefit, although to a lesser degree.
 A maximum file size can be set to prevent files above a specific size from being added.
 
+Because the cache needs to be hidden behind a Mutex, only one thread can get access at a time.
+This will have a negative performance impact in cases where the webserver is handling enough traffic to constantly cause lock contention.
+
+This performance hit can be mitigated by using a pool of caches at the expense of increased memory use,
+or by immediately falling back to getting files from the filesystem if a lock can't be gained.
 # Warning
 This crate is still under development.
 

@@ -5,6 +5,7 @@ use priority_function::{PriorityFunction, default_priority_function};
 use std::usize;
 
 
+/// Error types that can be encountered when a cache is built.
 #[derive(Debug, PartialEq)]
 pub enum CacheBuildError {
     SizeLimitNotSet,
