@@ -20,17 +20,8 @@ use priority_function::{PriorityFunction, default_priority_function};
 enum CacheInvalidationError {
     NoMoreFilesToRemove,
     NewPriorityIsNotHighEnough,
-    NewFileSmallerThanMin,
-    NewFileLargerThanMax,
-    NewFileLargerThanCache,
     InvalidMetadata,
     InvalidPath,
-}
-
-#[derive(Debug, PartialEq)]
-enum CacheInvalidationSuccess {
-    ReplacedFile,
-    InsertedFileIntoAvailableSpace,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -279,7 +270,7 @@ impl Cache {
     /// ```
     ///
     pub fn alter_access_count(&mut self, pathbuf: &PathBuf, alter_count_function: fn(&usize) -> usize ) -> bool {
-        let mut new_count: usize;
+        let new_count: usize;
         {
             match self.access_count_map.get(pathbuf) {
                 Some(access_count_entry) => {
@@ -320,7 +311,7 @@ impl Cache {
     /// ```
     ///
     pub fn alter_all_access_counts(&mut self, alter_count_function: fn(&usize) -> usize ) {
-        let mut all_counts: Vec<PathBuf>;
+        let all_counts: Vec<PathBuf>;
         {
             all_counts = self.access_count_map
                 .iter()
