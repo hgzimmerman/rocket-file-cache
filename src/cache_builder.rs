@@ -53,8 +53,10 @@ impl CacheBuilder {
     ///
     ///
     /// ```
+    /// use rocket_file_cache::Cache;
+    /// use rocket_file_cache::CacheBuilder;
     /// let cache: Cache = CacheBuilder::new()
-    ///     .size(1024 * 1024 * 50) // 50 MB cache
+    ///     .size_limit_bytes(1024 * 1024 * 50) // 50 MB cache
     ///     .priority_function(|access_count, size| {
     ///         access_count * access_count * size
     ///     })
@@ -83,8 +85,11 @@ impl CacheBuilder {
     /// # Example
     ///
     /// ```
+    /// use rocket_file_cache::Cache;
+    /// use rocket_file_cache::CacheBuilder;
+    ///
     /// let cache: Cache = CacheBuilder::new()
-    ///     .size(1024 * 1024 * 50) // 50 MB cache
+    ///     .size_limit_bytes(1024 * 1024 * 50) // 50 MB cache
     ///     .min_file_size(1024 * 4) // Don't store files smaller than 4 KB
     ///     .max_file_size(1024 * 1024 * 6) // Don't store files larger than 6 MB
     ///     .build()
@@ -137,6 +142,7 @@ impl CacheBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path};
 
     #[test]
     fn no_size_error(){
