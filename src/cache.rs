@@ -132,7 +132,7 @@ impl Cache {
     ///
     ///     // Try to lock the cache in order to use it.
     ///     match cache.try_lock() {
-    ///         Ok(mut cache) => cache.get(pathbuf),
+    ///         Ok(mut cache) => cache.get(&pathbuf),
     ///         Err(_) => {
     ///             // Fall back to using the FS if another thread owns the lock.
     ///             match NamedFile::open(pathbuf).ok() {
@@ -144,20 +144,20 @@ impl Cache {
     /// }
     /// # }
     /// ```
-    pub fn get(&mut self, pathbuf: PathBuf) -> Option<ResponderFile> {
+    pub fn get(&mut self, pathbuf: &PathBuf) -> Option<ResponderFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
         {
-            if let Some(cache_file) = self.get_from_cache(&pathbuf) {
+            if let Some(cache_file) = self.get_from_cache(pathbuf) {
                 debug!("Cache hit for file: {:?}", pathbuf);
-                self.increment_access_count(&pathbuf); // File is in the cache, increment the count
-                self.update_stats(&pathbuf);
+                self.increment_access_count(pathbuf); // File is in the cache, increment the count
+                self.update_stats(pathbuf);
                 return Some(ResponderFile::from(cache_file));
             }
         }
         // TODO Consider if I should have a check step that just checks if the file will pass the tests, then another step that just inserts it.
         // If the file can't be immediately accessed, try to get it from the FS.
-        self.try_insert(pathbuf).ok()
+        self.try_insert(pathbuf.clone()).ok()
     }
 
 
@@ -251,7 +251,7 @@ impl Cache {
     ///
     /// let mut cache = Cache::new(1024 * 1024 * 20);
     /// let pathbuf: PathBuf = PathBuf::new();
-    /// cache.get(pathbuf.clone());
+    /// cache.get(&pathbuf);
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
     pub fn contains_key(&self, pathbuf: &PathBuf) -> bool {
@@ -635,10 +635,10 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
-        cache.get(path_10m.clone()); // add the 10 mb file to the cache
+        cache.get(&path_10m); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get(path_10m.clone()).unwrap();
+            let cached_file = cache.get(&path_10m).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -650,7 +650,7 @@ mod tests {
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         b.iter(|| {
-            let cached_file = cache.get(path_10m.clone()).unwrap();
+            let cached_file = cache.get(&path_10m).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -671,10 +671,10 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-        cache.get(path_1m.clone()); // add the 10 mb file to the cache
+        cache.get(&path_1m); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get(path_1m.clone()).unwrap();
+            let cached_file = cache.get(&path_1m).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -686,7 +686,7 @@ mod tests {
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
         b.iter(|| {
-            let cached_file = cache.get(path_1m.clone()).unwrap();
+            let cached_file = cache.get(&path_1m).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -697,7 +697,7 @@ mod tests {
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
         b.iter(|| {
-            let mut named_file = NamedFile::open(path_1m.clone()).unwrap();
+            let mut named_file = NamedFile::open(&path_1m).unwrap();
             let mut v :Vec<u8> = Vec::new();
             named_file.read_to_end(&mut v).unwrap();
         });
@@ -710,10 +710,10 @@ mod tests {
         let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
-        cache.get(path_5m.clone()); // add the 10 mb file to the cache
+        cache.get(&path_5m); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get(path_5m.clone()).unwrap();
+            let cached_file = cache.get(&path_5m).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -725,7 +725,7 @@ mod tests {
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
         b.iter(|| {
-            let cached_file = cache.get(path_5m.clone()).unwrap();
+            let cached_file = cache.get(&path_5m).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -748,21 +748,21 @@ mod tests {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
         let mut cache: Cache = Cache::new(MEG1 *3); //Cache can hold 3Mb
-        cache.get(path_1m.clone()); // add the file to the cache
+        cache.get(&path_1m); // add the file to the cache
 
         // Add 1024 1kib files to the cache.
         for i in 0..1024 {
             let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
             // make sure that the file has a high priority.
             for _ in 0..10000 {
-                cache.get(path.clone());
+                cache.get(&path);
             }
         }
 
         assert_eq!(cache.used_bytes(), MEG1 * 2);
 
         b.iter(|| {
-            let cached_file = cache.get(path_1m.clone()).unwrap();
+            let cached_file = cache.get(&path_1m).unwrap();
             cached_file.dummy_write()
         });
     }
@@ -779,12 +779,12 @@ mod tests {
             let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
             // make sure that the file has a high priority.
             for _ in 0..1000 {
-                cache.get(path.clone());
+                cache.get(&path);
             }
         }
 
         b.iter(|| {
-            let cached_file = cache.get(path_1m.clone()).unwrap();
+            let cached_file = cache.get(&path_1m).unwrap();
             // Mimic what is done when the response body is set.
             cached_file.dummy_write()
         });
@@ -803,12 +803,12 @@ mod tests {
             let path = create_test_file(&temp_dir, 1024 * 5, format!("{}_5kib.txt", i).as_str());
             // make sure that the file has a high priority by accessing it many times
             for _ in 0..1000 {
-                cache.get(path.clone());
+                cache.get(&path);
             }
         }
 
         b.iter(|| {
-            let cached_file: ResponderFile = cache.get(path_5m.clone()).unwrap();
+            let cached_file: ResponderFile = cache.get(&path_5m).unwrap();
             // Mimic what is done when the response body is set.
             cached_file.dummy_write()
         });
@@ -901,26 +901,26 @@ mod tests {
 
         println!("1:\n{:#?}", cache);
         assert_eq!(
-            cache.get(path_5m.clone() ),
+            cache.get(&path_5m),
             Some(ResponderFile::from(cached_file_5m))
         );
 
         println!("2:\n{:#?}", cache);
         assert_eq!(
-            cache.get( path_2m.clone()),
+            cache.get( &path_2m),
             Some(ResponderFile::from(cached_file_2m))
         );
 
         println!("3:\n{:#?}", cache);
         assert_eq!(
-            cache.get( path_1m.clone() ),
+            cache.get( &path_1m ),
             Some(ResponderFile::from(named_file_1m))
         );
         println!("4:\n{:#?}", cache);
         // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
         // file is less than (sqrt(1)_size * 2_access) for the new file.
         assert_eq!(
-            cache.get(path_1m.clone(), ),
+            cache.get(&path_1m ),
             Some(ResponderFile::from(cached_file_1m))
         );
 
@@ -959,7 +959,7 @@ mod tests {
 
         // expect the cache to get the item from the FS.
         assert_eq!(
-            cache.get(path_5m.clone()),
+            cache.get(&path_5m),
             Some(ResponderFile::from(cached_file))
         );
 
@@ -979,12 +979,12 @@ mod tests {
         let cached_file: CachedFile = CachedFile::open(path_5m.clone()).unwrap();
 
         assert_eq!(
-            cache.get(path_5m.clone()),
+            cache.get(&path_5m),
             Some(ResponderFile::from(cached_file))
         );
 
         assert_eq!(
-            match cache.get(path_5m.clone()).unwrap() {
+            match cache.get(&path_5m).unwrap() {
                 ResponderFile::Cached(c) => c.file.size,
                 ResponderFile::FileSystem(_) => unreachable!()
             },
@@ -997,7 +997,7 @@ mod tests {
         cache.refresh(&path_5m);
 
         assert_eq!(
-            match cache.get(path_of_file_with_10mb_but_path_name_5m.clone()).unwrap() {
+            match cache.get(&path_of_file_with_10mb_but_path_name_5m).unwrap() {
                 ResponderFile::Cached(c) => c.file.size,
                 ResponderFile::FileSystem(_) => unreachable!()
             },
