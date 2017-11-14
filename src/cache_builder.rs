@@ -1,7 +1,7 @@
 use cache::Cache;
 
 use std::collections::HashMap;
-use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
+use priority_function::{PriorityFunction, default_priority_function};
 use std::usize;
 
 
@@ -11,6 +11,7 @@ pub enum CacheBuildError {
     MinFileSizeIsLargerThanMaxFileSize
 }
 
+/// A builder for Caches.
 #[derive(Debug)]
 pub struct CacheBuilder {
     size_limit: Option<usize>,
@@ -20,7 +21,9 @@ pub struct CacheBuilder {
 }
 
 
+
 impl CacheBuilder {
+    /// Create a new CacheBuilder.
     pub fn new() -> CacheBuilder {
         CacheBuilder {
             size_limit: None,
@@ -30,7 +33,7 @@ impl CacheBuilder {
         }
     }
 
-    /// Mandatory parameter, must be set.
+    /// Mandatory parameter.
     /// Sets the maximum number of bytes the cache can hold.
     pub fn size_limit_bytes<'a>(&'a mut self, size_limit_bytes: usize) -> &mut Self {
         self.size_limit = Some(size_limit_bytes);
@@ -47,21 +50,46 @@ impl CacheBuilder {
     ///
     /// The priority function should be kept simple, as it is calculated on every file in the cache
     /// every time a new file is attempted to be added.
+    ///
+    ///
+    /// ```
+    /// let cache: Cache = CacheBuilder::new()
+    ///     .size(1024 * 1024 * 50) // 50 MB cache
+    ///     .priority_function(|access_count, size| {
+    ///         access_count * access_count * size
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
     pub fn priority_function<'a>(&'a mut self, priority_function: PriorityFunction) -> &mut Self {
         self.priority_function = Some(priority_function);
         self
     }
 
+    /// Set the minimum size in bytes for files that can be stored in the cache
     pub fn min_file_size<'a>(&'a mut self, min_size: usize) -> &mut Self {
         self.min_file_size = Some(min_size);
         self
     }
 
+    /// Set the maximum size in bytes for files that can be stored in the cache
     pub fn max_file_size<'a>(&'a mut self, max_size: usize) -> &mut Self {
         self.max_file_size = Some(max_size);
         self
     }
 
+    /// Finalize the cache.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let cache: Cache = CacheBuilder::new()
+    ///     .size(1024 * 1024 * 50) // 50 MB cache
+    ///     .min_file_size(1024 * 4) // Don't store files smaller than 4 KB
+    ///     .max_file_size(1024 * 1024 * 6) // Don't store files larger than 6 MB
+    ///     .build()
+    ///     .unwrap();
+    /// ```
     pub fn build(&self) -> Result<Cache, CacheBuildError> {
         let size_limit = match self.size_limit {
             Some(s) => s,
@@ -70,7 +98,7 @@ impl CacheBuilder {
 
         let priority_function: PriorityFunction = match self.priority_function {
             Some(p) => p,
-            None => DEFAULT_PRIORITY_FUNCTION
+            None => default_priority_function
         };
 
         if let Some(min_file_size) = self.min_file_size {

@@ -7,17 +7,17 @@ use std::fs::Metadata;
 use std::fs;
 
 use cached_file::CachedFile;
-use cached_file::ResponderFile;
+use responder_file::ResponderFile;
 
 use in_memory_file::InMemoryFile;
-use priority_function::{PriorityFunction, DEFAULT_PRIORITY_FUNCTION};
+use priority_function::{PriorityFunction, default_priority_function};
 
 
 
 
 
 #[derive(Debug, PartialEq)]
-pub enum CacheInvalidationError {
+enum CacheInvalidationError {
     NoMoreFilesToRemove,
     NewPriorityIsNotHighEnough,
     NewFileSmallerThanMin,
@@ -28,7 +28,7 @@ pub enum CacheInvalidationError {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum CacheInvalidationSuccess {
+enum CacheInvalidationSuccess {
     ReplacedFile,
     InsertedFileIntoAvailableSpace,
 }
@@ -46,8 +46,8 @@ pub struct FileStats {
     priority: usize
 }
 
-/// The Cache holds a number of files whose bytes fit into its size_limit.
-/// The Cache acts as a proxy to the filesystem, returning cached files if they are in the cache,
+/// The cache holds a number of files whose bytes fit into its size_limit.
+/// The cache acts as a proxy to the filesystem, returning cached files if they are in the cache,
 /// or reading a file directly from the filesystem if the file is not in the cache.
 ///
 /// When the cache is full, each file in the cache will have priority score determined by a provided
@@ -82,12 +82,17 @@ impl Cache {
     ///
     /// * `size_limit` - The number of bytes that the Cache is allowed to hold at a given time.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// Cache::new(1024 * 1024 * 30) // Create a cache that can hold 30 MB of files
+    /// ```
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
             min_file_size: 0,
             max_file_size: usize::MAX,
-            priority_function: DEFAULT_PRIORITY_FUNCTION,
+            priority_function: default_priority_function,
             file_map: HashMap::new(),
             file_stats_map: HashMap::new(),
             access_count_map: HashMap::new(),
@@ -103,6 +108,26 @@ impl Cache {
     /// also acts as a key for the file in the cache.
     /// The path will be used to find a cached file in the cache or find a file in the filesystem if
     /// an entry in the cache doesn't exist.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// // Try to lock the cache in order to use it.
+    /// // Fall back to using the FS if another thread owns the lock.
+    /// #[get("/<file..>")]
+    /// fn files(file: PathBuf, cache: State<Mutex<Cache>> ) -> Option<ResponderFile> {
+    ///     let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
+    ///     match cache.try_lock() {
+    ///         Ok(mut cache) => cache.get(pathbuf),
+    ///         Err(_) => {
+    ///             match NamedFile::open(pathbuf).ok() {
+    ///                 Some(file) => Some(ResponderFile::from(file)),
+    ///                 None => None
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// ```
     pub fn get(&mut self, pathbuf: PathBuf) -> Option<ResponderFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
@@ -177,6 +202,13 @@ impl Cache {
     /// # Arguments
     ///
     /// * `pathbuf` - A pathbuf that acts as a key to the file that should be removed from the cache
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// cache.remove(pathbuf);
+    /// assert!(!cache.contains_key(pathbuf));
+    /// ```
     pub fn remove(&mut self, pathbuf: &PathBuf) {
         self.file_stats_map.remove(pathbuf);
         self.file_map.remove(pathbuf);
@@ -186,6 +218,34 @@ impl Cache {
         *entry = 0
     }
 
+    /// Returns a boolean indicating if the cache has an entry corresponding to the given key.
+    ///
+    /// # Arguments
+    ///
+    /// * `pathbuf` - A pathbuf that is used as a key to look up the file.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let mut cache: Cache = Cache::new(1024 * 1024 * 20);
+    /// cache.get(pathbuf);
+    /// assert!(cache.contains_key(pathbuf));
+    /// ```
+    pub fn contains_key(&self, pathbuf: &PathBuf) -> bool {
+        self.file_map.contains_key(pathbuf)
+    }
+
+
+    /// Gets the sum of the sizes of the files that are stored in the cache.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let percentage_used: f64 = cache.used_bytes() / cache.size as f64;
+    /// ```
+    pub fn used_bytes(&self) -> usize {
+        self.file_map.iter().fold(0usize, |size, x| size + x.1.size)
+    }
 
     /// Gets the size of the file from the file's metadata.
     /// This avoids having to read the file into memory in order to get the file size.
@@ -244,7 +304,7 @@ impl Cache {
 
         // Determine how much space can still be used (represented by a negative value) or how much
         // space needs to be freed in order to make room for the new file
-        let required_space_for_new_file: isize = (self.size_bytes() as isize + size as isize) - self.size_limit as isize;
+        let required_space_for_new_file: isize = (self.used_bytes() as isize + size as isize) - self.size_limit as isize;
 
 
         if size > self.max_file_size || size < self.min_file_size {
@@ -479,10 +539,7 @@ impl Cache {
         priorities
     }
 
-    /// Gets the size of the files that constitute the file_map.
-    fn size_bytes(&self) -> usize {
-        self.file_map.iter().fold(0usize, |size, x| size + x.1.size)
-    }
+
 
 }
 
@@ -676,7 +733,7 @@ mod tests {
             }
         }
 
-        assert_eq!(cache.size_bytes(), MEG1 * 2);
+        assert_eq!(cache.used_bytes(), MEG1 * 2);
 
         b.iter(|| {
             let cached_file = cache.get(path_1m.clone()).unwrap();

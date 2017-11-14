@@ -5,15 +5,17 @@ extern crate rocket;
 extern crate log;
 
 
-pub mod cache;
+mod cache;
 mod in_memory_file;
-pub mod cached_file;
-pub mod cache_builder;
-pub mod priority_function;
+mod cached_file;
+mod cache_builder;
+mod priority_function;
+mod responder_file;
 
 pub use cache::Cache;
 pub use cache_builder::{CacheBuilder, CacheBuildError};
-pub use cached_file::{CachedFile, ResponderFile};
+pub use cached_file::CachedFile;
+pub use responder_file::ResponderFile;
 pub use priority_function::*;
 
 
