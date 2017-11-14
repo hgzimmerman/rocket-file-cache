@@ -36,9 +36,9 @@ In environments where the files in question can all fit comfortably into the cac
 
 Rocket File Cache has not been tested yet in an environment where large files are fighting to be kept in the cache, but small improvements in performance should be expected there.
 
-## Performance
+### Performance
 
-The bench tests try to get the file from whatever source, and read it once into memory.
+The bench tests try to get the file from whatever source, either cache or filesystem, and read it once into memory.
 The misses measure the time it takes for the cache to realize that the file is not stored, and to read the file from disk.
 Running the bench tests on an AWS EC2 t2 micro instance (82 MB/s HDD) returned these results:
 ```
@@ -70,14 +70,12 @@ or by immediately falling back to getting files from the filesystem if a lock ca
 For queries that will retrieve an entry from the cache, there is no time penalty for each additional file in the cache.
 The more items in the cache, the larger the time penalty for a cache miss.
 
-# Warning
-This crate is still under development.
+### Requirements
+* Nightly Rust (2017-10-22)
+* Rocket >= 0.3.3
 
-Public functions and structures are still subject to change, but are mostly stabilized at this point.
-
-### Things that may change:
-* Default priority function. Because performance seems to be most improved for smaller files, the default priority function
-may change to favor smaller files in the future.
+# Notes
+If you have any feature requests or notice any bugs, please open an Issue.
 
 
 # Documentation
