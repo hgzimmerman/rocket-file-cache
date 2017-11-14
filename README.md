@@ -66,6 +66,10 @@ This will have a negative performance impact in cases where the webserver is han
 
 This performance hit can be mitigated by using a pool of caches at the expense of increased memory use,
 or by immediately falling back to getting files from the filesystem if a lock can't be gained.
+
+For queries that will retrieve an entry from the cache, there is no time penalty for each additional file in the cache.
+The more items in the cache, the larger the time penalty for a cache miss.
+
 # Warning
 This crate is still under development.
 
