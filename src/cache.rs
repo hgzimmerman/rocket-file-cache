@@ -64,7 +64,7 @@ pub struct FileStats {
 /// in which case, the new file isn't inserted.
 #[derive(Debug)]
 pub struct Cache {
-    pub(crate) size_limit: usize, // The number of bytes the file_map should ever hold.
+    pub size_limit: usize, // The number of bytes the file_map should ever hold.
     pub(crate) min_file_size: usize, // The minimum size file that can be added to the cache
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
@@ -163,11 +163,9 @@ impl Cache {
 
 
 
-    /// If the a file has changed on disk, the cache will not automatically know that a change has occurred.
-    ///
+    /// If a file has changed on disk, the cache will not automatically know that a change has occurred.
     /// Calling this function will check if the file exists, read the new file into memory,
-    /// replace the old file, and update the priority score to reflect the possibly new size of the
-    /// file.
+    /// replace the old file, and update the priority score to reflect the new size of the file.
     ///
     ///  # Arguments
     ///
