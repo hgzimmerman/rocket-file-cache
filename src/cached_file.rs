@@ -4,7 +4,7 @@ use rocket::request::Request;
 
 use std::result;
 use std::sync::Arc;
-use std::path::PathBuf;
+use std::path::{PathBuf,Path};
 use std::io;
 
 use in_memory_file::InMemoryFile;
@@ -21,10 +21,10 @@ pub struct CachedFile {
 
 impl CachedFile {
     /// Reads the file at the path into a CachedFile.
-    pub fn open(path: PathBuf) -> io::Result<CachedFile> {
-        let sized_file: InMemoryFile = InMemoryFile::open(&path)?;
+    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<CachedFile> {
+        let sized_file: InMemoryFile = InMemoryFile::open(path.as_ref())?;
         Ok(CachedFile {
-            path,
+            path: path.as_ref().to_path_buf(),
             file: Arc::new(sized_file)
         })
     }

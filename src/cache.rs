@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::usize;
@@ -100,7 +100,7 @@ impl Cache {
     ///
     /// # Arguments
     ///
-    /// * `pathbuf` - A pathbuf that represents the path of the file in the filesystem. The pathbuf
+    /// * `path` - A path that represents the path of the file in the filesystem. The path
     /// also acts as a key for the file in the cache.
     /// The path will be used to find a cached file in the cache or find a file in the filesystem if
     /// an entry in the cache doesn't exist.
@@ -123,14 +123,14 @@ impl Cache {
     ///
     /// #[get("/<file..>")]
     /// fn files(file: PathBuf, cache: State<Mutex<Cache>> ) -> Option<ResponderFile> {
-    ///     let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
+    ///     let path: PathBuf = Path::new("www/").join(file).to_owned();
     ///
     ///     // Try to lock the mutex in order to use the cache.
     ///     match cache.try_lock() {
-    ///         Ok(mut cache) => cache.get(&pathbuf),
+    ///         Ok(mut cache) => cache.get(&path),
     ///         Err(_) => {
     ///             // Fall back to using the filesystem if another thread owns the lock.
-    ///             match NamedFile::open(pathbuf).ok() {
+    ///             match NamedFile::open(path).ok() {
     ///                 Some(file) => Some(ResponderFile::from(file)),
     ///                 None => None
     ///             }
@@ -139,19 +139,19 @@ impl Cache {
     /// }
     /// # }
     /// ```
-    pub fn get(&mut self, pathbuf: &PathBuf) -> Option<ResponderFile> {
+    pub fn get<P: AsRef<Path>>(&mut self, path: P) -> Option<ResponderFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
         {
-            if let Some(cache_file) = self.get_from_cache(pathbuf) {
-                debug!("Cache hit for file: {:?}", pathbuf);
-                self.increment_access_count(pathbuf); // File is in the cache, increment the count
-                self.update_stats(pathbuf);
+            if let Some(cache_file) = self.get_from_cache(&path) {
+                debug!("Cache hit for file: {:?}", path.as_ref());
+                self.increment_access_count(&path); // File is in the cache, increment the count
+                self.update_stats(&path);
                 return Some(ResponderFile::from(cache_file));
             }
         }
         // If the file can't be immediately accessed, try to get it from the FS.
-        self.try_insert(pathbuf.clone()).ok()
+        self.try_insert(path).ok()
     }
 
 
@@ -163,25 +163,25 @@ impl Cache {
     ///
     /// # Arguments
     ///
-    /// * `pathbuf` - A pathbuf that represents the path of the file in the filesystem, and key to
+    /// * `path` - A path that represents the path of the file in the filesystem, and key to
     /// the file in the cache.
     /// The path will be used to find the new file in the filesystem and to find the old file to replace in
     /// the cache.
-    pub fn refresh(&mut self, pathbuf: &PathBuf) -> bool {
+    pub fn refresh<P: AsRef<Path>>(&mut self, path: P) -> bool {
 
         let mut is_ok_to_refresh: bool = false;
 
         // Check if the file exists in the cache
-        if self.file_map.contains_key(pathbuf)  {
+        if self.file_map.contains_key(&path.as_ref().to_path_buf())  {
             // See if the new file exists.
-            let path_string: String = match pathbuf.clone().to_str() {
+            let path_string: String = match path.as_ref().to_str() {
                 Some(s) => String::from(s),
                 None => return false
             };
             if let Ok(metadata) = fs::metadata(path_string.as_str()) {
                 if metadata.is_file() {
                     // If the stats for the old file exist
-                    if self.file_stats_map.contains_key(pathbuf) {
+                    if self.file_stats_map.contains_key(&path.as_ref().to_path_buf()) {
                         is_ok_to_refresh = true;
                     }
                 }
@@ -189,14 +189,14 @@ impl Cache {
         }
 
         if is_ok_to_refresh {
-            if let Ok(new_file) = InMemoryFile::open(pathbuf.clone()) {
-                debug!("Refreshing file: {:?}", pathbuf);
+            if let Ok(new_file) = InMemoryFile::open(path.as_ref().to_path_buf()) {
+                debug!("Refreshing file: {:?}", path.as_ref());
                 {
-                    self.file_map.remove(pathbuf);
-                    self.file_map.insert(pathbuf.clone(), Arc::new(new_file));
+                    self.file_map.remove(&path.as_ref().to_path_buf());
+                    self.file_map.insert(path.as_ref().to_path_buf(), Arc::new(new_file));
                 }
 
-                self.update_stats(pathbuf)
+                self.update_stats(path)
 
             }
         }
@@ -210,7 +210,7 @@ impl Cache {
     ///
     /// # Arguments
     ///
-    /// * `pathbuf` - A pathbuf that acts as a key to look up the file that should be removed from the cache.
+    /// * `path` - A path that acts as a key to look up the file that should be removed from the cache.
     ///
     /// # Example
     ///
@@ -223,10 +223,10 @@ impl Cache {
     /// cache.remove(&pathbuf);
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
-    pub fn remove(&mut self, pathbuf: &PathBuf) {
-        self.file_stats_map.remove(pathbuf);
-        self.file_map.remove(pathbuf);
-        let entry = self.access_count_map.entry(pathbuf.clone()).or_insert(
+    pub fn remove<P: AsRef<Path>>(&mut self, path: P) {
+        self.file_stats_map.remove(&path.as_ref().to_path_buf());
+        self.file_map.remove(&path.as_ref().to_path_buf());
+        let entry = self.access_count_map.entry(path.as_ref().to_path_buf()).or_insert(
             0
         );
         *entry = 0
@@ -236,7 +236,7 @@ impl Cache {
     ///
     /// # Arguments
     ///
-    /// * `pathbuf` - A pathbuf that is used as a key to look up the file.
+    /// * `path` - A path that is used as a key to look up the file.
     ///
     /// # Example
     ///
@@ -249,16 +249,16 @@ impl Cache {
     /// cache.get(&pathbuf);
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
-    pub fn contains_key(&self, pathbuf: &PathBuf) -> bool {
-        self.file_map.contains_key(pathbuf)
+    pub fn contains_key<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.file_map.contains_key(&path.as_ref().to_path_buf())
     }
 
 
     /// Alters the access count value of one file in the access_count_map.
     /// # Arguments
     ///
-    /// * pathbuf - The key to look up the file.
-    /// * alter_count_function - A function that determines how to alter the access_count for the file.
+    /// * `path` - The key to look up the file.
+    /// * `alter_count_function` - A function that determines how to alter the access_count for the file.
     ///
     /// # Example
     ///
@@ -273,10 +273,10 @@ impl Cache {
     /// cache.alter_access_count(&pathbuf, | x | { 0 }); // Set the access count to 0.
     /// ```
     ///
-    pub fn alter_access_count(&mut self, pathbuf: &PathBuf, alter_count_function: fn(&usize) -> usize ) -> bool {
+    pub fn alter_access_count<P: AsRef<Path>>(&mut self, path: P, alter_count_function: fn(&usize) -> usize ) -> bool {
         let new_count: usize;
         {
-            match self.access_count_map.get(pathbuf) {
+            match self.access_count_map.get(&path.as_ref().to_path_buf()) {
                 Some(access_count_entry) => {
                     new_count = alter_count_function(access_count_entry);
                 }
@@ -284,9 +284,9 @@ impl Cache {
             }
         }
         {
-            self.access_count_map.insert(pathbuf.clone(), new_count);
+            self.access_count_map.insert(path.as_ref().to_path_buf(), new_count);
         }
-        self.update_stats(pathbuf);
+        self.update_stats(&path);
         return true
     }
 
@@ -295,8 +295,7 @@ impl Cache {
     ///
     /// # Arguments
     ///
-    /// * pathbuf - The key to look up the file.
-    /// * alter_count_function - A function that determines how to alter the access_count for the file.
+    /// * `alter_count_function` - A function that determines how to alter the access_count for the file.
     ///
     /// # Example
     ///
@@ -323,7 +322,6 @@ impl Cache {
                 .collect();
         }
         for pathbuf in all_counts {
-
             self.alter_access_count(&pathbuf, alter_count_function);
         }
 
@@ -345,8 +343,8 @@ impl Cache {
 
     /// Gets the size of the file from the file's metadata.
     /// This avoids having to read the file into memory in order to get the file size.
-    fn get_file_size_from_metadata(path: &PathBuf) -> Result<usize, CacheInvalidationError> {
-        let path_string: String = match path.clone().to_str() {
+    fn get_file_size_from_metadata<P: AsRef<Path>>(path: P) -> Result<usize, CacheInvalidationError> {
+        let path_string: String = match path.as_ref().to_str() {
             Some(s) => String::from(s),
             None => return Err(CacheInvalidationError::InvalidPath)
         };
@@ -388,15 +386,13 @@ impl Cache {
     /// look up the location of the file in the filesystem if the file is not in the cache.
     ///
     ///
-    fn try_insert(&mut self, path: PathBuf) -> Result< ResponderFile, CacheInvalidationError> {
+    fn try_insert<P: AsRef<Path>>(&mut self, path: P) -> Result< ResponderFile, CacheInvalidationError> {
+        let path: PathBuf = path.as_ref().to_path_buf();
+        trace!("Trying to insert file {:?}", path);
 
-        let size = Cache::get_file_size_from_metadata(&path)?;
         // If the FS can read metadata for a file, then the file exists, and it should be safe to increment
         // the access_count and update.
-
-        // TODO move these to areas that are only accessed after the file has been confirmed to exist.
-//        self.increment_access_count(&path);
-//        self.update_stats(&path);
+        let size: usize = Cache::get_file_size_from_metadata(&path)?;
 
         // Determine how much space can still be used (represented by a negative value) or how much
         // space needs to be freed in order to make room for the new file
@@ -439,7 +435,8 @@ impl Cache {
         } else {
             debug!("Trying to make room for the file");
 
-            //TODO check if the file exists before trying to increment its count. Maybe?
+            // Because the size was gotten from the file's metadata, we know that it exists,
+            // so its fine to increment the account
             self.increment_access_count(&path);
 
             // The access_count should have incremented since the last time this was called, so the priority must be recalculated.
@@ -552,11 +549,11 @@ impl Cache {
     }
 
     ///Helper function that gets the file from the cache if it exists there.
-    fn get_from_cache(&mut self, path: &PathBuf) -> Option<CachedFile> {
-        match self.file_map.get(path) {
+    fn get_from_cache<P: AsRef<Path>>(&mut self, path: P) -> Option<CachedFile> {
+        match self.file_map.get(&path.as_ref().to_path_buf()) {
             Some(in_memory_file) => {
                 Some(CachedFile {
-                    path: path.clone(),
+                    path: path.as_ref().to_path_buf(),
                     file: in_memory_file.clone(),
                 })
             }
@@ -568,8 +565,8 @@ impl Cache {
     /// Helper function for incrementing the access count for a given file name.
     ///
     /// This should only be used in cases where the file is known to exist, to avoid bloating the access count map with useless values.
-    fn increment_access_count(&mut self, path: &PathBuf) {
-        let access_count: &mut usize = self.access_count_map.entry(path.to_path_buf()).or_insert(
+    fn increment_access_count<P: AsRef<Path>>(&mut self, path: P) {
+        let access_count: &mut usize = self.access_count_map.entry(path.as_ref().to_path_buf()).or_insert(
             // By default, the count and priority will be 0.
             // The count will immediately be incremented, and the score can't be calculated without the size of the file in question.
             // Therefore, files not in the cache MUST have their priority score calculated on insertion attempt.
@@ -580,15 +577,15 @@ impl Cache {
 
 
     /// Update the stats associated with this file.
-    fn update_stats(&mut self, path: &PathBuf) {
-        let size: usize = match self.file_map.get(path){
+    fn update_stats<P: AsRef<Path>>(&mut self, path: P) {
+        let size: usize = match self.file_map.get(&path.as_ref().to_path_buf()){
             Some(in_memory_file) => in_memory_file.size,
-            None => Cache::get_file_size_from_metadata(&path).unwrap_or(0)
+            None => Cache::get_file_size_from_metadata(&path.as_ref().to_path_buf()).unwrap_or(0)
         };
 
-        let access_count: usize = self.access_count_map.get(path).unwrap_or(&1).clone();
+        let access_count: usize = self.access_count_map.get(&path.as_ref().to_path_buf()).unwrap_or(&1).clone();
 
-        let stats: &mut FileStats = self.file_stats_map.entry(path.to_path_buf()).or_insert(
+        let stats: &mut FileStats = self.file_stats_map.entry(path.as_ref().to_path_buf()).or_insert(
             FileStats {
                 size,
                 access_count,
@@ -599,9 +596,6 @@ impl Cache {
         stats.access_count = access_count;
         stats.priority = (self.priority_function)(stats.access_count, stats.size); // update the priority score.
     }
-
-
-
 
 
 
