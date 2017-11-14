@@ -40,21 +40,21 @@ Rocket File Cache has not been tested yet in an environment where large files ar
 
 The bench tests try to get the file from whatever source, and read it once into memory.
 The misses measure the time it takes for the cache to realize that the file is not stored, and to read the file from disk.
-Running the unscientific bench tests on an AWS EC2 t2 micro instance (82 MB/s HDD) returned these results:
+Running the bench tests on an AWS EC2 t2 micro instance (82 MB/s HDD) returned these results:
 ```
-test cache::tests::cache_get_10mb                       ... bench:   3,886,350 ns/iter (+/- 328,979)
-test cache::tests::cache_get_1mb                        ... bench:      76,307 ns/iter (+/- 4,262)
-test cache::tests::cache_get_1mb_from_1000_entry_cache  ... bench:      74,306 ns/iter (+/- 1,390)
-test cache::tests::cache_get_5mb                        ... bench:   1,715,183 ns/iter (+/- 288,559)
-test cache::tests::cache_miss_10mb                      ... bench:   5,234,225 ns/iter (+/- 526,213)
-test cache::tests::cache_miss_1mb                       ... bench:   1,041,573 ns/iter (+/- 22,910)
-test cache::tests::cache_miss_1mb_from_1000_entry_cache ... bench:      79,631 ns/iter (+/- 2,536)
-test cache::tests::cache_miss_5mb                       ... bench:   3,087,674 ns/iter (+/- 53,189)
-test cache::tests::cache_miss_5mb_from_1000_entry_cache ... bench:   1,738,275 ns/iter (+/- 20,879)
-test cache::tests::named_file_read_10mb                 ... bench:   4,905,043 ns/iter (+/- 844,470)
-test cache::tests::named_file_read_1mb                  ... bench:   1,037,299 ns/iter (+/- 15,554)
-test cache::tests::named_file_read_5mb                  ... bench:   2,358,750 ns/iter (+/- 65,191)
-test cache::tests::sized_file_read_10mb                 ... bench:  14,617,872 ns/iter (+/- 1,524,981)
+test cache::tests::cache_get_10mb                       ... bench:   1,444,068 ns/iter (+/- 251,467)
+test cache::tests::cache_get_1mb                        ... bench:      79,397 ns/iter (+/- 4,613)
+test cache::tests::cache_get_1mb_from_1000_entry_cache  ... bench:      79,038 ns/iter (+/- 1,751)
+test cache::tests::cache_get_5mb                        ... bench:     724,262 ns/iter (+/- 7,751)
+test cache::tests::cache_miss_10mb                      ... bench:   3,184,473 ns/iter (+/- 299,657)
+test cache::tests::cache_miss_1mb                       ... bench:     806,821 ns/iter (+/- 19,731)
+test cache::tests::cache_miss_1mb_from_1000_entry_cache ... bench:   1,379,925 ns/iter (+/- 25,118)
+test cache::tests::cache_miss_5mb                       ... bench:   1,542,059 ns/iter (+/- 27,063)
+test cache::tests::cache_miss_5mb_from_1000_entry_cache ... bench:   2,090,871 ns/iter (+/- 37,040)
+test cache::tests::in_memory_file_read_10mb             ... bench:   7,222,402 ns/iter (+/- 596,325)
+test cache::tests::named_file_read_10mb                 ... bench:   4,908,544 ns/iter (+/- 581,408)
+test cache::tests::named_file_read_1mb                  ... bench:     893,447 ns/iter (+/- 18,354)
+test cache::tests::named_file_read_5mb                  ... bench:   1,605,741 ns/iter (+/- 41,418)
 ```
 
 It can be seen that on a server with slow disk reads, small file access times are vastly improved versus the disk.
