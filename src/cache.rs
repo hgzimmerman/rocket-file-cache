@@ -259,6 +259,81 @@ impl Cache {
     }
 
 
+    /// Alters the access count value of one file in the access_count_map.
+    /// # Arguments
+    ///
+    /// * pathbuf - The key to look up the file.
+    /// * alter_count_function - A function that determines how to alter the access_count for the file.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rocket_file_cache::Cache;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut cache = Cache::new(1024 * 1024 * 10);
+    /// let pathbuf = PathBuf::new();
+    /// cache.get(&pathbuf); // Add a file to the cache
+    /// cache.remove(&pathbuf); // Removing the file will not reset its access count.
+    /// cache.alter_access_count(&pathbuf, | x | { 0 }); // Set the access count to 0.
+    /// ```
+    ///
+    pub fn alter_access_count(&mut self, pathbuf: &PathBuf, alter_count_function: fn(&usize) -> usize ) -> bool {
+        let mut new_count: usize;
+        {
+            match self.access_count_map.get(pathbuf) {
+                Some(access_count_entry) => {
+                    new_count = alter_count_function(access_count_entry);
+                }
+                None => return false // Can't update a file that isn't listed.
+            }
+        }
+        {
+            self.access_count_map.insert(pathbuf.clone(), new_count);
+        }
+        self.update_stats(pathbuf);
+        return true
+    }
+
+    /// Alters the access count value of every file in the access_count_map.
+    /// This is useful for manually aging-out entries in the cache.
+    ///
+    /// # Arguments
+    ///
+    /// * pathbuf - The key to look up the file.
+    /// * alter_count_function - A function that determines how to alter the access_count for the file.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rocket_file_cache::Cache;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut cache = Cache::new(1024 * 1024 * 10);
+    /// let pathbuf = PathBuf::new();
+    /// let other_pathbuf = PathBuf::new();
+    /// cache.get(&pathbuf);
+    /// cache.get(&other_pathbuf);
+    /// // Reduce all access counts by half,
+    /// // allowing newer content to enter the cache more easily.
+    /// cache.alter_all_access_counts(| x | { x / 2 });
+    /// ```
+    ///
+    pub fn alter_all_access_counts(&mut self, alter_count_function: fn(&usize) -> usize ) {
+        let mut all_counts: Vec<PathBuf>;
+        {
+            all_counts = self.access_count_map
+                .iter()
+                .map(|x: (&PathBuf, &usize)| x.0.clone())
+                .collect();
+        }
+        for pathbuf in all_counts {
+
+            self.alter_access_count(&pathbuf, alter_count_function);
+        }
+
+    }
+
     /// Gets the sum of the sizes of the files that are stored in the cache.
     ///
     /// # Example
@@ -512,6 +587,7 @@ impl Cache {
             }
         );
         stats.size = size;
+        stats.access_count = access_count;
         stats.priority = (self.priority_function)(stats.access_count, stats.size); // update the priority score.
     }
 
@@ -753,11 +829,10 @@ mod tests {
         // Add 1024 1kib files to the cache.
         for i in 0..1024 {
             let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
-            // make sure that the file has a high priority.
-            for _ in 0..10000 {
-                cache.get(&path);
-            }
+            cache.get(&path);
         }
+        // make sure that the file has a high priority.
+        cache.alter_all_access_counts(|x| x * 100000);
 
         assert_eq!(cache.used_bytes(), MEG1 * 2);
 
@@ -777,11 +852,11 @@ mod tests {
         // Add 1024 1kib files to the cache.
         for i in 0..1024 {
             let path = create_test_file(&temp_dir, 1024, format!("{}_1kib.txt", i).as_str());
-            // make sure that the file has a high priority.
-            for _ in 0..1000 {
-                cache.get(&path);
-            }
+            cache.get(&path);
         }
+        // make sure that the file has a high priority.
+        cache.alter_all_access_counts(|x| x * 100000);
+//        println!("{:#?}", cache);
 
         b.iter(|| {
             let cached_file = cache.get(&path_1m).unwrap();
@@ -801,11 +876,10 @@ mod tests {
         // Add 1024 5kib files to the cache.
         for i in 0..1024 {
             let path = create_test_file(&temp_dir, 1024 * 5, format!("{}_5kib.txt", i).as_str());
-            // make sure that the file has a high priority by accessing it many times
-            for _ in 0..1000 {
-                cache.get(&path);
-            }
+            cache.get(&path);
         }
+        // make sure that the file has a high priority.
+        cache.alter_all_access_counts(|x| x * 100000);
 
         b.iter(|| {
             let cached_file: ResponderFile = cache.get(&path_5m).unwrap();
@@ -965,7 +1039,6 @@ mod tests {
 
         cache.remove(&path_5m);
 
-//        cache.get(path_10m.clone()); // add a bigger file to the cache
         assert!(cache.contains_key(&path_5m.clone()) == false);
     }
 
