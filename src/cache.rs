@@ -394,9 +394,9 @@ impl Cache {
         // If the FS can read metadata for a file, then the file exists, and it should be safe to increment
         // the access_count and update.
 
-        // Since these are updated here, the
-        self.increment_access_count(&path);
-        self.update_stats(&path);
+        // TODO move these to areas that are only accessed after the file has been confirmed to exist.
+//        self.increment_access_count(&path);
+//        self.update_stats(&path);
 
         // Determine how much space can still be used (represented by a negative value) or how much
         // space needs to be freed in order to make room for the new file
@@ -406,8 +406,11 @@ impl Cache {
         if size > self.max_file_size || size < self.min_file_size {
 
             debug!("File does not fit size constraints of the cache.");
-            match NamedFile::open(path) {
-                Ok(named_file) => return Ok(ResponderFile::from(named_file)),
+            match NamedFile::open(path.clone()) {
+                Ok(named_file) => {
+                    self.increment_access_count(&path);
+                    return Ok(ResponderFile::from(named_file))
+                },
                 Err(_) => return Err(CacheInvalidationError::InvalidPath)
             }
 
@@ -422,6 +425,10 @@ impl Cache {
                         path: path.clone(),
                         file: arc_file
                     };
+
+                    self.increment_access_count(&path);
+                    self.update_stats(&path);
+
                     return Ok(ResponderFile::from(cached_file))
                 }
                 Err(_) => {
@@ -432,11 +439,13 @@ impl Cache {
         } else {
             debug!("Trying to make room for the file");
 
+            //TODO check if the file exists before trying to increment its count. Maybe?
+            self.increment_access_count(&path);
+
             // The access_count should have incremented since the last time this was called, so the priority must be recalculated.
             // Also, the size generally
             let new_file_access_count: usize = self.access_count_map.get(&path).unwrap_or(&1).clone();
             let new_file_priority: usize = (self.priority_function)(new_file_access_count, size);
-
 
 
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
@@ -447,9 +456,12 @@ impl Cache {
                             let arc_file: Arc<InMemoryFile> = Arc::new(file);
                             self.file_map.insert(path.clone(), arc_file.clone());
                             let cached_file = CachedFile {
-                                path,
+                                path: path.clone(),
                                 file: arc_file
                             };
+
+                            self.update_stats(&path);
+
                             return Ok(ResponderFile::from(cached_file))
                         }
                         Err(_) => {
@@ -467,8 +479,10 @@ impl Cache {
                     // The new file would not be accepted by the cache, so instead of reading the whole file
                     // into memory, and then copying it yet again when it is attached to the body of the
                     // response, use a NamedFile instead.
-                    match NamedFile::open(path) {
-                        Ok(named_file) => Ok(ResponderFile::from(named_file)),
+                    match NamedFile::open(path.clone()) {
+                        Ok(named_file) => {
+                            Ok(ResponderFile::from(named_file))
+                        },
                         Err(_) => Err(CacheInvalidationError::InvalidPath)
                     }
                 }
@@ -603,31 +617,9 @@ impl Cache {
     ///
     fn sorted_priorities(&self) -> Vec<(PathBuf, FileStats)> {
 
-        // TODO, this simplification doesn't work yet because as this is currently called, the file_stats_map has an entry for the new file, but doesn't have an entry in the file_map. This causes an unwrap error farther down the stack. To fix, try only update after inserting.
-//        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_stats_map
-//            .iter()
-//            .map( |x| (x.0.clone(), x.1.clone()))
-//            .collect();
-
-        // TODO if the file_map and file_stats_map can be guaranteed to have the same entries, then this outer iter block for the file_map can be removed
-        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_map
+        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_stats_map
             .iter()
-            .map(|file| {
-                let (file_key, _) = file;
-
-                let stats: FileStats = self.file_stats_map
-                    .get(file_key)
-                    .unwrap_or(
-                        &FileStats {
-                            size: 0,
-                            access_count: 0,
-                            priority: 0,
-                        }
-                    )
-                    .clone();
-
-                (file_key.clone(), stats)
-            })
+            .map( |x| (x.0.clone(), x.1.clone()))
             .collect();
 
         // Sort the priorities from highest priority to lowest, so when they are pop()ed later,
@@ -931,18 +923,22 @@ mod tests {
 
         let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
 
+        println!("0:\n{:#?}", cache);
         assert_eq!(
             cache.try_insert(path_5m.clone()),
             Ok(ResponderFile::from(cached_file_5m))
         );
+        println!("1:\n{:#?}", cache);
         assert_eq!(
             cache.try_insert(path_1m.clone() ),
             Ok(ResponderFile::from(named_file_1m))
         );
+        println!("2:\n{:#?}", cache);
         assert_eq!(
             cache.try_insert( path_1m.clone() ),
             Ok(ResponderFile::from(named_file_1m_2))
         );
+        println!("3:\n{:#?}", cache);
         assert_eq!(
             cache.try_insert( path_1m.clone() ),
             Ok(ResponderFile::from(cached_file_1m))
@@ -993,6 +989,7 @@ mod tests {
             Some(ResponderFile::from(cached_file_1m))
         );
 
+        println!("5:\n{:#?}", cache);
 
         if let None = cache.get_from_cache(&path_1m) {
             assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
