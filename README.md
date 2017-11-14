@@ -23,7 +23,7 @@ fn main() {
 #[get("/<file..>")]
 fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<CachedFile> {
     let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
-    cache.lock().unwrap().get(pathbuf)
+    cache.lock().unwrap().get(&pathbuf)
 }
 ```
 

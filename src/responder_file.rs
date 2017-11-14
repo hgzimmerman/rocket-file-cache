@@ -1,4 +1,4 @@
-use rocket::http::{Status, ContentType};
+use rocket::http::Status;
 use rocket::response::{Response, Responder, NamedFile};
 use rocket::request::Request;
 

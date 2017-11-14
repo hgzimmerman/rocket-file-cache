@@ -167,7 +167,7 @@ impl Cache {
     /// Calling this function will check if the file exists, read the new file into memory,
     /// replace the old file, and update the priority score to reflect the new size of the file.
     ///
-    ///  # Arguments
+    /// # Arguments
     ///
     /// * `pathbuf` - A pathbuf that represents the path of the file in the filesystem, and key in the cache.
     /// The path will be used to find the new file in the filesystem and find the old file to replace in
