@@ -21,7 +21,7 @@ fn main() {
 }
 
 #[get("/<file..>")]
-fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<CachedFile> {
+fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<ResponderFile> {
     let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
     cache.lock().unwrap().get(&pathbuf)
 }
