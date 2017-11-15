@@ -23,6 +23,7 @@ fn files(file: PathBuf, cache_pool: State<Pool> ) -> Option<ResponderFile> {
 
 fn main() {
 
+    // 50MB * 4 means up to 200 MB can be allocated for the cache, but will only store 50 MB worth of files
     let pool : Pool =  Pool::new(4, || Cache::new(1024 * 1024 * 50));
     rocket::ignite()
         .manage(pool)
@@ -66,5 +67,19 @@ impl Pool {
             }
         }
         None // All caches are occupied
+    }
+
+
+    /// Alter every element in the pool by locking them one at a time.
+    ///
+    /// # Warning
+    /// If a lock is held elsewhere, and the provided function would cause that element to remain locked
+    /// this has the possibility to deadlock.
+    fn alter_all<'a>(&'a self, function: fn(MutexGuard<'a, Cache>) ) {
+        for e in self.caches.iter() {
+            // all entries in the pooled try to lock, one at a time, so that the provided function
+            // can operate on the pool's contents.
+            function(e.lock().unwrap())
+        }
     }
 }
