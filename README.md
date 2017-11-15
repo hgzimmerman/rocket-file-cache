@@ -3,27 +3,31 @@ An in-memory file cache for the Rocket web framework.
 
 Rocket File Cache can be used as a drop in replacement for Rocket's NamedFile when serving files.
 
-This:
+This code from the [static_files](https://github.com/SergioBenitez/Rocket/blob/master/examples/static_files/src/main.rs) example from Rocket:
 ```rust
 #[get("/<file..>")]
 fn files(file: PathBuf) -> Option<NamedFile> {
-    NamedFile::open(Path::new("www/").join(file)).ok()
+    NamedFile::open(Path::new("static/").join(file)).ok()
+}
+
+fn main() {
+    rocket::ignite().mount("/", routes![files]).launch();
 }
 ```
-Can be replaced with:
+Can be sped up by getting files via a cache instead:
 ```rust
+#[get("/<file..>")]
+fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<ResponderFile> {
+    let pathbuf: PathBuf = Path::new("static/").join(file).to_owned();
+    cache.lock().unwrap().get(&pathbuf)
+}
+
 fn main() {
-    let cache: Mutex<Cache> = Mutex::new(Cache::new(1024 * 1024 * 40)); // 40 megabytes
+    let cache: Mutex<Cache> = Mutex::new(Cache::new(1024 * 1024 * 40)); // 40 MB
     rocket::ignite()
         .manage(cache)
         .mount("/", routes![files])
         .launch();
-}
-
-#[get("/<file..>")]
-fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<ResponderFile> {
-    let pathbuf: PathBuf = Path::new("www/").join(file).to_owned();
-    cache.lock().unwrap().get(&pathbuf)
 }
 ```
 
@@ -32,9 +36,9 @@ fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<ResponderFile> {
 Rocket File Cache keeps a set of frequently accessed files in memory so your webserver won't have to wait for your disk to read the files.
 This should improve latency and throughput on systems that are bottlenecked on disk I/O.
 
-In environments where the files in question can all fit comfortably into the cache, and the files themselves are small, it has been observed that webpage load times have seen > 3x improvements.
+In environments where the files in question can all fit comfortably into the cache, and the files themselves are small, significant speedups for serving the files have been observed.
 
-Rocket File Cache has not been tested yet in an environment where large files are fighting to be kept in the cache, but small improvements in performance should be expected there.
+Rocket File Cache has not been tested yet in an environment where large files ( > 10MB ) are fighting to be kept in the cache, but small improvements in performance should be expected there.
 
 ### Performance
 
@@ -61,7 +65,7 @@ It can be seen that on a server with slow disk reads, small file access times ar
 Larger files also seem to benefit, although to a lesser degree.
 A maximum file size can be set to prevent files above a specific size from being added.
 
-Because the cache needs to be hidden behind a Mutex, only one thread can get access at a time.
+Because the cache needs to be guarded by a Mutex, only one thread can get access at a time.
 This will have a negative performance impact in cases where the webserver is handling enough traffic to constantly cause lock contention.
 
 This performance hit can be mitigated by using a pool of caches at the expense of increased memory use,
