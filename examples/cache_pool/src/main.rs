@@ -63,6 +63,8 @@ impl Pool {
     }
 
 
+    /// Try to get a random cache from the pool.
+    /// If all caches are locked, this will return `None`.
     fn try_get<'a>(&'a self) -> Option<MutexGuard<'a, Cache>> {
 
         // Randomize the range that can be accessed
