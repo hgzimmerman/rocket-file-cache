@@ -17,6 +17,11 @@ use rand::{thread_rng, Rng};
 fn files(file: PathBuf, cache_pool: State<Pool> ) -> Option<ResponderFile> {
     let path: PathBuf = Path::new("www/").join(file).to_owned();
 
+    // I am currently a little fuzzy about Rocket's threading model
+    // I would assume that an unwrap is safe here because there are an equal to or greater than number
+    // of caches in the pool, than threads rocket is working with.
+    // Assuming one thread per request, there will never be more locks taken out than there are
+    // requests to be serviced, preventing a panic!() at the unwrap.
     cache_pool.try_get().unwrap().get(&path)
 }
 
@@ -41,6 +46,11 @@ struct Pool {
 }
 
 impl Pool {
+
+    // You should want the number of entries to correspond to the number of threads being used by Rocket
+    // for servicing requests.
+    // Any more, and you are wasting space.
+    // Any less, and you can't just unwrap() the result of try_get(), as all caches may be locked at once.
     fn new(number_of_entries: usize, cache_creation_function: fn() -> Cache) -> Pool {
         let mut caches: Vec<Arc<Mutex<Cache>>> = vec!();
 
