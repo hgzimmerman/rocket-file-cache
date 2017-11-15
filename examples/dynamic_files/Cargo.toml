@@ -1,0 +1,8 @@
+[package]
+name = "dynamic_files"
+version = "0.0.0"
+
+[dependencies]
+rocket-file-cache = { path = "../../" }
+rocket = "0.3.3"
+rocket_codegen = "0.3.3"
