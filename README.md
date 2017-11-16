@@ -97,3 +97,6 @@ The more items in the cache, the larger the time penalty for a cache miss.
 # Notes
 If you have any feature requests or notice any bugs, please open an Issue.
 
+# Alternatives 
+
+* [Nginx](http://nginx.org/)
