@@ -100,3 +100,8 @@ If you have any feature requests or notice any bugs, please open an Issue.
 # Alternatives 
 
 * [Nginx](http://nginx.org/)
+* Write your own.
+Most of the work here focuses on when to replace items in the cache.
+If you know that you will never grow or shrink your cache of files, all you need is a 
+`HashMap<PathBuf, Vec<u8>>`, an `impl Responder<'static> for Vec<u8> {...}`, and some glue logic
+to hold your files in memory and serve them as responses.
