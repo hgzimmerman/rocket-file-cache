@@ -717,9 +717,8 @@ mod tests {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
         b.iter(|| {
-            let mut named_file = NamedFile::open(path_10m.clone()).unwrap();
-            let mut v :Vec<u8> = Vec::new();
-            named_file.read_to_end(&mut v).unwrap();
+            let named_file = ResponderFile::from(NamedFile::open(&path_10m).unwrap());
+            named_file.dummy_write()
         });
     }
 
@@ -754,9 +753,8 @@ mod tests {
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
         b.iter(|| {
-            let mut named_file = NamedFile::open(&path_1m).unwrap();
-            let mut v :Vec<u8> = Vec::new();
-            named_file.read_to_end(&mut v).unwrap();
+            let named_file = ResponderFile::from(NamedFile::open(&path_1m).unwrap());
+            named_file.dummy_write()
         });
     }
 
@@ -793,9 +791,8 @@ mod tests {
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
         b.iter(|| {
-            let mut named_file = NamedFile::open(path_5m.clone()).unwrap();
-            let mut v :Vec<u8> = Vec::new();
-            named_file.read_to_end(&mut v).unwrap();
+            let named_file = ResponderFile::from(NamedFile::open(&path_5m).unwrap());
+            named_file.dummy_write()
         });
     }
 
@@ -813,7 +810,7 @@ mod tests {
             cache.get(&path);
         }
         // make sure that the file has a high priority.
-        cache.alter_all_access_counts(|x| x * 100000);
+        cache.alter_all_access_counts(|x| x + 1 * 100000);
 
         assert_eq!(cache.used_bytes(), MEG1 * 2);
 
@@ -836,7 +833,7 @@ mod tests {
             cache.get(&path);
         }
         // make sure that the file has a high priority.
-        cache.alter_all_access_counts(|x| x * 100000);
+        cache.alter_all_access_counts(|x| x + 1 * 100000);
 //        println!("{:#?}", cache);
 
         b.iter(|| {
@@ -860,7 +857,7 @@ mod tests {
             cache.get(&path);
         }
         // make sure that the file has a high priority.
-        cache.alter_all_access_counts(|x| x * 100000);
+        cache.alter_all_access_counts(|x| x + 1  * 100000);
 
         b.iter(|| {
             let cached_file: ResponderFile = cache.get(&path_5m).unwrap();
