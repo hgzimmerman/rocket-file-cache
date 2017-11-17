@@ -141,7 +141,7 @@ impl Cache {
     /// }
     /// # }
     /// ```
-    pub fn get<P: AsRef<Path>>(&mut self, path: P) -> Option<ResponderFile> {
+    pub fn get<'a, P: AsRef<Path>>(&'a mut self, path: P) -> Option<ResponderFile<'a>> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
 
@@ -647,6 +647,9 @@ mod tests {
     use std::fs::File;
     use rocket::response::NamedFile;
     use std::io::Read;
+    use std::sync::MutexGuard;
+    use std::sync::Mutex;
+    use in_memory_file::InMemoryFile;
 
 
     const MEG1: usize = 1024 * 1024;
@@ -673,11 +676,11 @@ mod tests {
 
 
     // Standardize the way a file is used in these tests.
-    impl ResponderFile {
+    impl <'a> ResponderFile<'a> {
         fn dummy_write(self) {
             match self {
                 ResponderFile::Cached(cached_file) => {
-                    let file: *const InMemoryFile = Arc::into_raw(cached_file.file);
+                    let file: *const MutexGuard<'a, InMemoryFile> = Arc::into_raw(cached_file.file);
                     unsafe {
                         let _ = (*file).bytes.clone();
                         let _ = Arc::from_raw(file); // Prevent dangling pointer?
@@ -913,8 +916,14 @@ mod tests {
         let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
         let named_file_1m_2 = NamedFile::open(path_1m.clone()).unwrap();
 
-        let cached_file_5m = CachedFile::open(path_5m.clone()).unwrap();
-        let cached_file_1m = CachedFile::open(path_1m.clone()).unwrap();
+        let imf_5m = InMemoryFile::open(path_5m.clone()).unwrap();
+        let mutex_imf_5 = Mutex::new(imf_5m);
+        let cached_file_5m = CachedFile::new(path_5m.clone(), mutex_imf_5.lock().unwrap());
+//        let cached_file_5m = CachedFile::open(path_5m.clone()).unwrap();
+//        let cached_file_1m = CachedFile::open(path_1m.clone()).unwrap();
+        let imf_1m = InMemoryFile::open(path_1m.clone()).unwrap();
+        let mutex_imf_1 = Mutex::new(imf_1m);
+        let cached_file_1m = CachedFile::new(path_1m.clone(), mutex_imf_1.lock().unwrap());
 
         let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
 
@@ -951,9 +960,17 @@ mod tests {
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
 
-        let cached_file_5m = CachedFile::open(path_5m.clone()).unwrap();
-        let cached_file_2m = CachedFile::open(path_2m.clone()).unwrap();
-        let cached_file_1m = CachedFile::open(path_1m.clone()).unwrap();
+        let imf_5m = InMemoryFile::open(path_5m.clone()).unwrap();
+        let mutex_imf_5 = Mutex::new(imf_5m);
+        let cached_file_5m = CachedFile::new(path_5m.clone(), mutex_imf_5.lock().unwrap());
+
+        let imf_2m = InMemoryFile::open(path_2m.clone()).unwrap();
+        let mutex_imf_2 = Mutex::new(imf_2m);
+        let cached_file_2m = CachedFile::new(path_2m.clone(), mutex_imf_2.lock().unwrap());
+
+        let imf_1m = InMemoryFile::open(path_1m.clone()).unwrap();
+        let mutex_imf_1 = Mutex::new(imf_1m);
+        let cached_file_1m = CachedFile::new(path_1m.clone(), mutex_imf_1.lock().unwrap());
 
         let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
 
@@ -1000,6 +1017,8 @@ mod tests {
         if let Some(_) = cache.get_from_cache(&path_2m) {
             assert_eq!(&path_2m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
         }
+
+        drop(cache);
     }
 
 
@@ -1013,7 +1032,9 @@ mod tests {
         let path_10m: PathBuf = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         let named_file: NamedFile = NamedFile::open(path_5m.clone()).unwrap();
-        let cached_file: CachedFile = CachedFile::open(path_5m.clone()).unwrap();
+        let imf     : InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
+        let mutex_imf = Mutex::new(imf);
+        let cached_file: CachedFile = CachedFile::new(path_5m.clone(), mutex_imf.lock().unwrap());
 
 
 
@@ -1036,7 +1057,9 @@ mod tests {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
-        let cached_file: CachedFile = CachedFile::open(path_5m.clone()).unwrap();
+        let imf_5: InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
+        let mutex_imf_5 = Mutex::new(imf_5);
+        let cached_file: CachedFile = CachedFile::new(path_5m.clone(), mutex_imf_5.lock().unwrap());
 
         assert_eq!(
             cache.get(&path_5m),
@@ -1052,7 +1075,10 @@ mod tests {
         );
 
         let path_of_file_with_10mb_but_path_name_5m = create_test_file(&temp_dir, MEG10, FILE_MEG5);
-        let _cached_file_big: CachedFile = CachedFile::open(path_of_file_with_10mb_but_path_name_5m.clone() ).unwrap();
+
+        let imf_big: InMemoryFile = InMemoryFile::open(path_of_file_with_10mb_but_path_name_5m.clone()).unwrap();
+        let mutex_imf_big = Mutex::new(imf_big);
+        let _cached_file_big: CachedFile = CachedFile::new(path_of_file_with_10mb_but_path_name_5m.clone(), mutex_imf_big.lock().unwrap() );
 
         cache.refresh(&path_5m);
 
@@ -1062,9 +1088,9 @@ mod tests {
                 ResponderFile::FileSystem(_) => unreachable!()
             },
             MEG10
-        )
+        );
 
-
+        drop(cache);
     }
 
 }

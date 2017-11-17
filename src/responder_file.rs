@@ -36,31 +36,32 @@ impl  <'a>Responder<'a> for ResponderFile<'a> {
 }
 
 
-//impl <'a> PartialEq for ResponderFile<'a> {
-//    fn eq(&'a self, other: &'a ResponderFile) -> bool {
-//        match *self {
-//            ResponderFile::Cached(ref lhs_cached_file) => {
-//                match *other {
-//                    ResponderFile::Cached(ref rhs_cached_file) => {
-//                        *rhs_cached_file == *lhs_cached_file
-//                    }
-//                    ResponderFile::FileSystem(_) => {
-//                        false
-//                    }
-//                }
-//            }
-//            ResponderFile::FileSystem(ref lhs_named_file) => {
-//                match *other {
-//                    ResponderFile::Cached(_) => {
-//                        false
-//                    }
-//                    ResponderFile::FileSystem(ref rhs_named_file) => {
-//                        // Since all we have is a file handle this will settle for just comparing the paths for now
-//                        *lhs_named_file.path() == *rhs_named_file.path()
-//                    }
-//                }
-//            }
-//        }
-//
-//    }
-//}
+impl <'a, 'b> PartialEq for ResponderFile<'a> {
+    fn eq(&self, other: &ResponderFile) -> bool {
+        match *self {
+            ResponderFile::Cached(ref lhs_cached_file) => {
+                match *other {
+                    ResponderFile::Cached(ref rhs_cached_file) => {
+                        use std::ops::Deref;
+                        (*rhs_cached_file.file).deref() == (*lhs_cached_file.file).deref()
+                    }
+                    ResponderFile::FileSystem(_) => {
+                        false
+                    }
+                }
+            }
+            ResponderFile::FileSystem(ref lhs_named_file) => {
+                match *other {
+                    ResponderFile::Cached(_) => {
+                        false
+                    }
+                    ResponderFile::FileSystem(ref rhs_named_file) => {
+                        // Since all we have is a file handle this will settle for just comparing the paths for now
+                        *lhs_named_file.path() == *rhs_named_file.path()
+                    }
+                }
+            }
+        }
+
+    }
+}

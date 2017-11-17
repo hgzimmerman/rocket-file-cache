@@ -30,13 +30,27 @@ pub struct AltCachedFile<'a> {
 
 impl <'a>CachedFile<'a> {
     /// Reads the file at the path into a CachedFile.
-//    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<CachedFile<'a>> {
+//    pub fn open<P: AsRef<Path>>(path: P, m: &mut Mutex<InMemoryFile>) -> io::Result<CachedFile<'static>> {
 //        let sized_file: InMemoryFile = InMemoryFile::open(path.as_ref())?;
+//
+//        m = Mutex::new(sized_file);
+//
+//        unsafe {
+//            let locked_mutex = MutexGuard::new(m);
+//        }
+//
 //        Ok(CachedFile {
 //            path: path.as_ref().to_path_buf(),
-//            file: sized_file
+//            file: Arc::new(m)
 //        })
 //    }
+
+    pub(crate) fn new<P: AsRef<Path>>(path: P, m: MutexGuard<'a, InMemoryFile>) -> CachedFile<'a> {
+        CachedFile {
+            path: path.as_ref().to_path_buf(),
+            file: Arc::new(m)
+        }
+    }
 
 
     /// The unsafe code required to set the body of a response is encapsulated in this method.
