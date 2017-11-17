@@ -5,8 +5,10 @@ use std::usize;
 use rocket::response::NamedFile;
 use std::fs::Metadata;
 use std::fs;
+use std::sync::Mutex;
 
 use cached_file::CachedFile;
+use cached_file::AltCachedFile;
 use responder_file::ResponderFile;
 
 use in_memory_file::InMemoryFile;
@@ -63,7 +65,7 @@ pub struct Cache {
     pub(crate) min_file_size: usize, // The minimum size file that can be added to the cache
     pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
     pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
-    pub(crate) file_map: HashMap<PathBuf, Arc<InMemoryFile>>, // Holds the files that the cache is caching
+    pub(crate) file_map: HashMap<PathBuf, Arc<Mutex<InMemoryFile>>>, // Holds the files that the cache is caching
     pub(crate) file_stats_map: HashMap<PathBuf, FileStats>, // Holds stats for only the files in the file map.
     pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
@@ -142,16 +144,24 @@ impl Cache {
     pub fn get<P: AsRef<Path>>(&mut self, path: P) -> Option<ResponderFile> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
-        {
-            if let Some(cache_file) = self.get_from_cache(&path) {
-                debug!("Cache hit for file: {:?}", path.as_ref());
-                self.increment_access_count(&path); // File is in the cache, increment the count
+
+        if self.file_map.contains_key(&path.as_ref().to_path_buf()) {
+            {
+                self.increment_access_count(&path);
+            } // File is in the cache, increment the count
+            {
                 self.update_stats(&path);
-                return Some(ResponderFile::from(cache_file));
             }
+        } else {
+            return self.try_insert(path).ok();
         }
-        // If the file can't be immediately accessed, try to get it from the FS.
-        self.try_insert(path).ok()
+
+//        if let Some(cache_file) = self.get_from_cache(&path) {
+//            debug!("Cache hit for file: {:?}", path.as_ref());
+//            return Some(ResponderFile::from(cache_file));
+//        }
+
+        Some(ResponderFile::from(self.get_from_cache(&path).unwrap()))
     }
 
 
@@ -193,7 +203,7 @@ impl Cache {
                 debug!("Refreshing file: {:?}", path.as_ref());
                 {
                     self.file_map.remove(&path.as_ref().to_path_buf());
-                    self.file_map.insert(path.as_ref().to_path_buf(), Arc::new(new_file));
+                    self.file_map.insert(path.as_ref().to_path_buf(), Arc::new(Mutex::new(new_file)));
                 }
 
                 self.update_stats(path)
@@ -338,7 +348,7 @@ impl Cache {
     /// assert!(cache.used_bytes() == 0);
     /// ```
     pub fn used_bytes(&self) -> usize {
-        self.file_map.iter().fold(0usize, |size, x| size + x.1.size)
+        self.file_map.iter().fold(0usize, |size, x| size + x.1.lock().unwrap().size) // Todo, consider getting this from the stats instead, so a lock doesn't need to be taken.
     }
 
     /// Gets the size of the file from the file's metadata.
@@ -415,15 +425,18 @@ impl Cache {
             debug!("Cache has room for the file.");
             match InMemoryFile::open(path.as_path()) {
                 Ok(file) => {
-                    let arc_file: Arc<InMemoryFile> = Arc::new(file);
+                    let arc_file: Arc<Mutex<InMemoryFile>> = Arc::new(Mutex::new(file));
                     self.file_map.insert(path.clone(), arc_file.clone());
-                    let cached_file = CachedFile {
-                        path: path.clone(),
-                        file: arc_file
-                    };
 
                     self.increment_access_count(&path);
                     self.update_stats(&path);
+
+                    let cached_file = CachedFile {
+                        path: path.clone(),
+                        file: self.file_map.get(&path).unwrap().lock().unwrap()
+                    };
+
+
 
                     return Ok(ResponderFile::from(cached_file))
                 }
@@ -446,27 +459,35 @@ impl Cache {
 
 
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
-                Ok(removed_files) => {
+                Ok(files_to_be_removed) => {
                     debug!("Made room for new file");
                     match InMemoryFile::open(path.as_path()) {
                         Ok(file) => {
-                            let arc_file: Arc<InMemoryFile> = Arc::new(file);
-                            self.file_map.insert(path.clone(), arc_file.clone());
+
+                            // We have read a new file into memory, it is safe to
+                            // remove the old files.
+                            for file_key in files_to_be_removed {
+                                // The file was accessed with this key earlier when sorting priorities.
+                                // Unwrapping be safe.
+                                let _ = self.file_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
+                                let _ = self.file_stats_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
+                            }
+
+
+                            let arc_mutex_file: Arc<Mutex<InMemoryFile>> = Arc::new(Mutex::new(file));
+                            self.file_map.insert(path.clone(), arc_mutex_file.clone());
+                            self.update_stats(&path);
+
                             let cached_file = CachedFile {
                                 path: path.clone(),
-                                file: arc_file
+                                file: self.file_map.get(&path).unwrap().lock().unwrap()
                             };
 
-                            self.update_stats(&path);
+
 
                             return Ok(ResponderFile::from(cached_file))
                         }
                         Err(_) => {
-                            // The insertion failed, so the removed files need to be re-added to the
-                            // cache
-                            removed_files.into_iter().for_each( |removed_file| {
-                                self.file_map.insert(removed_file.path, removed_file.file);
-                            });
                             return Err(CacheInvalidationError::InvalidPath)
                         }
                     }
@@ -501,7 +522,7 @@ impl Cache {
     /// * `required_space` - A `usize` representing the number of bytes that must be freed to make room for a new file.
     /// * `new_file_priority` - A `usize` representing the priority of the new file to be added. If the priority of the files possibly being removed
     /// is greater than this value, then the files won't be removed.
-    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<Vec<CachedFile>, CacheInvalidationError> {
+    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<Vec<PathBuf>, CacheInvalidationError> {
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec![];
@@ -527,25 +548,8 @@ impl Cache {
                 None => return Err( CacheInvalidationError::NoMoreFilesToRemove),
             };
         }
+        Ok(file_paths_to_remove)
 
-        // Hold on to the arc pointers to the files, if for whatever reason, the new file can't be
-        // read, these will need to be added back to the cache.
-        let mut return_vec: Vec<CachedFile> = vec![];
-
-        // If this hasn't returned early, then the files to remove are less important than the new file.
-        for file_key in file_paths_to_remove {
-            // The file was accessed with this key earlier when sorting priorities.
-            // Unwrapping be safe.
-            let in_memory_file = self.file_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
-            let _ = self.file_stats_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
-
-            let removed_cached_file = CachedFile {
-                path: file_key.clone(),
-                file: in_memory_file
-            };
-            return_vec.push(removed_cached_file);
-        }
-        return Ok(return_vec);
     }
 
     ///Helper function that gets the file from the cache if it exists there.
@@ -554,7 +558,7 @@ impl Cache {
             Some(in_memory_file) => {
                 Some(CachedFile {
                     path: path.as_ref().to_path_buf(),
-                    file: in_memory_file.clone(),
+                    file: in_memory_file.lock().unwrap(), // Not too sure about creating another ARC here, or the clone().
                 })
             }
             None => None, // File not found
@@ -579,7 +583,7 @@ impl Cache {
     /// Update the stats associated with this file.
     fn update_stats<P: AsRef<Path>>(&mut self, path: P) {
         let size: usize = match self.file_map.get(&path.as_ref().to_path_buf()){
-            Some(in_memory_file) => in_memory_file.size,
+            Some(in_memory_file) => in_memory_file.as_ref().lock().unwrap().size,
             None => Cache::get_file_size_from_metadata(&path.as_ref().to_path_buf()).unwrap_or(0)
         };
 
