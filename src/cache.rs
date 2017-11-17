@@ -433,7 +433,7 @@ impl Cache {
 
                     let cached_file = CachedFile {
                         path: path.clone(),
-                        file: self.file_map.get(&path).unwrap().clone()
+                        file: Arc::new(self.file_map.get(&path).unwrap().lock().unwrap())
                     };
 
 
@@ -480,7 +480,7 @@ impl Cache {
 
                             let cached_file = CachedFile {
                                 path: path.clone(),
-                                file: self.file_map.get(&path).unwrap().clone()
+                                file: Arc::new(self.file_map.get(&path).unwrap().lock().unwrap())
                             };
 
 
@@ -558,7 +558,7 @@ impl Cache {
             Some(in_memory_file) => {
                 Some(CachedFile {
                     path: path.as_ref().to_path_buf(),
-                    file: in_memory_file.clone(), // Not too sure about creating another ARC here, or the clone().
+                    file: Arc::new(in_memory_file.lock().unwrap()), // Not too sure about creating another ARC here, or the clone().
                 })
             }
             None => None, // File not found
