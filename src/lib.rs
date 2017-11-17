@@ -1,6 +1,4 @@
 #![feature(test)]
-#![feature(conservative_impl_trait)]
-
 
 extern crate rocket;
 #[macro_use]
