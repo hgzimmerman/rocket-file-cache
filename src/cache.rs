@@ -6,6 +6,8 @@ use rocket::response::NamedFile;
 use std::fs::Metadata;
 use std::fs;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use cached_file::CachedFile;
 //use cached_file::AltCachedFile;
@@ -13,8 +15,6 @@ use responder_file::ResponderFile;
 
 use in_memory_file::InMemoryFile;
 use priority_function::{PriorityFunction, default_priority_function};
-
-
 
 
 
@@ -62,14 +62,16 @@ pub struct FileStats {
 pub struct Cache {
     /// The number of bytes the file_map should be able hold at once.
     pub size_limit: usize,
-    pub(crate) min_file_size: usize, // The minimum size file that can be added to the cache
-    pub(crate) max_file_size: usize, // The maximum size file that can be added to the cache
-    pub(crate) priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
+    pub min_file_size: usize, // The minimum size file that can be added to the cache
+    pub max_file_size: usize, // The maximum size file that can be added to the cache
+    pub priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: HashMap<PathBuf, Arc<Mutex<InMemoryFile>>>, // Holds the files that the cache is caching
-    pub(crate) file_stats_map: HashMap<PathBuf, FileStats>, // Holds stats for only the files in the file map.
-    pub(crate) access_count_map: HashMap<PathBuf, usize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
+    pub(crate) file_stats_map: Mutex<HashMap<PathBuf, FileStats>>, // Holds stats for only the files in the file map.
+    pub(crate) access_count_map: HashMap<PathBuf, AtomicUsize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
+unsafe impl Send for Cache {}
+unsafe impl Sync for Cache {}
 
 impl Cache {
     /// Creates a new Cache with the given size limit and the default priority function.
@@ -92,7 +94,7 @@ impl Cache {
             max_file_size: usize::MAX,
             priority_function: default_priority_function,
             file_map: HashMap::new(),
-            file_stats_map: HashMap::new(),
+            file_stats_map: Mutex::new(HashMap::new()),
             access_count_map: HashMap::new(),
         }
     }
@@ -191,7 +193,7 @@ impl Cache {
             if let Ok(metadata) = fs::metadata(path_string.as_str()) {
                 if metadata.is_file() {
                     // If the stats for the old file exist
-                    if self.file_stats_map.contains_key(&path.as_ref().to_path_buf()) {
+                    if self.file_stats_map.lock().unwrap().contains_key(&path.as_ref().to_path_buf()) {
                         is_ok_to_refresh = true;
                     }
                 }
@@ -234,12 +236,12 @@ impl Cache {
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
     pub fn remove<P: AsRef<Path>>(&mut self, path: P) {
-        self.file_stats_map.remove(&path.as_ref().to_path_buf());
+        self.file_stats_map.lock().unwrap().remove(&path.as_ref().to_path_buf());
         self.file_map.remove(&path.as_ref().to_path_buf());
         let entry = self.access_count_map.entry(path.as_ref().to_path_buf()).or_insert(
-            0
+            AtomicUsize::new(0)
         );
-        *entry = 0
+        entry.store(0, Ordering::Relaxed);
     }
 
     /// Returns a boolean indicating if the cache has an entry corresponding to the given key.
@@ -288,13 +290,13 @@ impl Cache {
         {
             match self.access_count_map.get(&path.as_ref().to_path_buf()) {
                 Some(access_count_entry) => {
-                    new_count = alter_count_function(access_count_entry);
+                    new_count = alter_count_function(&access_count_entry.load(Ordering::Relaxed));
                 }
                 None => return false // Can't update a file that isn't listed.
             }
         }
         {
-            self.access_count_map.insert(path.as_ref().to_path_buf(), new_count);
+            self.access_count_map.insert(path.as_ref().to_path_buf(), AtomicUsize::new(new_count));
         }
         self.update_stats(&path);
         return true
@@ -328,7 +330,7 @@ impl Cache {
         {
             all_counts = self.access_count_map
                 .iter()
-                .map(|x: (&PathBuf, &usize)| x.0.clone())
+                .map(|x: (&PathBuf, &AtomicUsize)| x.0.clone())
                 .collect();
         }
         for pathbuf in all_counts {
@@ -454,8 +456,12 @@ impl Cache {
 
             // The access_count should have incremented since the last time this was called, so the priority must be recalculated.
             // Also, the size generally
-            let new_file_access_count: usize = self.access_count_map.get(&path).unwrap_or(&1).clone();
-            let new_file_priority: usize = (self.priority_function)(new_file_access_count, size);
+            let new_file_priority: usize;
+            {
+                let default_atomic_access_count = AtomicUsize::new(1);
+                let new_file_access_count: &AtomicUsize = self.access_count_map.get(&path).unwrap_or(&default_atomic_access_count);
+                new_file_priority = (self.priority_function)(new_file_access_count.load(Ordering::Relaxed), size);
+            }
 
 
             match self.make_room_for_new_file(required_space_for_new_file as usize, new_file_priority) {
@@ -470,7 +476,7 @@ impl Cache {
                                 // The file was accessed with this key earlier when sorting priorities.
                                 // Unwrapping be safe.
                                 let _ = self.file_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
-                                let _ = self.file_stats_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
+                                let _ = self.file_stats_map.lock().unwrap().remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
                             }
 
 
@@ -570,13 +576,14 @@ impl Cache {
     ///
     /// This should only be used in cases where the file is known to exist, to avoid bloating the access count map with useless values.
     fn increment_access_count<P: AsRef<Path>>(&mut self, path: P) {
-        let access_count: &mut usize = self.access_count_map.entry(path.as_ref().to_path_buf()).or_insert(
+        let access_count: &mut AtomicUsize = self.access_count_map.entry(path.as_ref().to_path_buf()).or_insert(
             // By default, the count and priority will be 0.
             // The count will immediately be incremented, and the score can't be calculated without the size of the file in question.
             // Therefore, files not in the cache MUST have their priority score calculated on insertion attempt.
-            0usize
+            AtomicUsize::new(0usize)
         );
-        *access_count += 1; // Increment the access count
+        access_count.store(access_count.load(Ordering::Relaxed) + 1, Ordering::Relaxed)
+//        *access_count = access_count + 1; // Increment the access count
     }
 
 
@@ -587,17 +594,19 @@ impl Cache {
             None => Cache::get_file_size_from_metadata(&path.as_ref().to_path_buf()).unwrap_or(0)
         };
 
-        let access_count: usize = self.access_count_map.get(&path.as_ref().to_path_buf()).unwrap_or(&1).clone();
+        let default_atomic_access_count = AtomicUsize::new(1);
+        let access_count: &AtomicUsize = self.access_count_map.get(&path.as_ref().to_path_buf()).unwrap_or(&default_atomic_access_count).clone();
 
-        let stats: &mut FileStats = self.file_stats_map.entry(path.as_ref().to_path_buf()).or_insert(
+        let mut locked_stats_map = self.file_stats_map.lock().unwrap();
+        let stats: &mut FileStats = locked_stats_map.entry(path.as_ref().to_path_buf()).or_insert(
             FileStats {
                 size,
-                access_count,
+                access_count: access_count.load(Ordering::Relaxed),
                 priority: 0
             }
         );
         stats.size = size;
-        stats.access_count = access_count;
+        stats.access_count = access_count.load(Ordering::Relaxed);
         stats.priority = (self.priority_function)(stats.access_count, stats.size); // update the priority score.
     }
 
@@ -615,7 +624,7 @@ impl Cache {
     ///
     fn sorted_priorities(&self) -> Vec<(PathBuf, FileStats)> {
 
-        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_stats_map
+        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_stats_map.lock().unwrap()
             .iter()
             .map( |x| (x.0.clone(), x.1.clone()))
             .collect();
