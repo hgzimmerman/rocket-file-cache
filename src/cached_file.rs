@@ -5,8 +5,7 @@ use rocket::request::Request;
 use std::result;
 use std::sync::Arc;
 use std::path::{PathBuf,Path};
-use std::io;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{MutexGuard};
 
 use in_memory_file::InMemoryFile;
 
@@ -21,47 +20,15 @@ pub struct CachedFile<'a> {
 }
 
 
-#[derive(Debug,)]
-pub struct AltCachedFile<'a> {
-    pub(crate) path: PathBuf,
-    pub(crate) file: Arc<MutexGuard<'a, InMemoryFile>>, // I would need to clone a locked file from a normal CachedFile in order to use this.
-    // That would be bad for performance.
-}
-
 impl <'a>CachedFile<'a> {
     /// Reads the file at the path into a CachedFile.
-//    pub fn open<P: AsRef<Path>>(path: P, m: &mut Mutex<InMemoryFile>) -> io::Result<CachedFile<'static>> {
-//        let sized_file: InMemoryFile = InMemoryFile::open(path.as_ref())?;
-//
-//        m = Mutex::new(sized_file);
-//
-//        unsafe {
-//            let locked_mutex = MutexGuard::new(m);
-//        }
-//
-//        Ok(CachedFile {
-//            path: path.as_ref().to_path_buf(),
-//            file: Arc::new(m)
-//        })
-//    }
-
     pub(crate) fn new<P: AsRef<Path>>(path: P, m: MutexGuard<'a, InMemoryFile>) -> CachedFile<'a> {
         CachedFile {
             path: path.as_ref().to_path_buf(),
             file: Arc::new(m)
         }
     }
-
-
-    /// The unsafe code required to set the body of a response is encapsulated in this method.
-    /// It converts the SizedFile into a raw pointer so its data can be used to set the streamed body
-    /// without explicit ownership.
-    /// This prevents copying the file, leading to a significant speedup.
-//    #[inline]
-    pub(crate) fn set_response_body<'b: 'a>(&'a self, response: &'b mut Response) {
-//        response.set_streamed_body(self.file.lock().unwrap().bytes.as_slice())
-
-    }
+    // TODO, create a macro that reads an in-memory-file, creates a mutex, and locks the file in the mutex, and creates the cached file.
 }
 
 

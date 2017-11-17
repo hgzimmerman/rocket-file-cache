@@ -14,7 +14,7 @@ pub enum ResponderFile<'a> {
 
 
 impl <'a>From<CachedFile<'a>> for ResponderFile<'a> {
-    fn from(cached_file: CachedFile) -> ResponderFile {
+    fn from(cached_file: CachedFile<'a>) -> ResponderFile<'a> {
         ResponderFile::Cached(cached_file)
     }
 }
