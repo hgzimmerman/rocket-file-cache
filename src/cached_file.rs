@@ -6,7 +6,7 @@ use std::result;
 use std::sync::Arc;
 use std::path::{PathBuf,Path};
 use std::io;
-use std::sync::MutexGuard;
+use std::sync::{Mutex, MutexGuard};
 
 use in_memory_file::InMemoryFile;
 
@@ -15,18 +15,20 @@ use in_memory_file::InMemoryFile;
 /// This struct is created when when a request to the cache is made.
 /// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
 #[derive(Debug)]
-pub struct CachedFile <'a> {
+pub struct CachedFile {
     pub(crate) path: PathBuf,
-    pub(crate) file: MutexGuard<'a, InMemoryFile>,
+    pub(crate) file: Arc<Mutex<InMemoryFile>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+
+#[derive(Debug,)]
 pub struct AltCachedFile {
     pub(crate) path: PathBuf,
-    pub(crate) file: Arc<InMemoryFile>,
+    pub(crate) file: Arc<InMemoryFile>, // I would need to clone a locked file from a normal CachedFile in order to use this.
+    // That would be bad for performance.
 }
 
-impl <'a>CachedFile<'a> {
+impl CachedFile {
     /// Reads the file at the path into a CachedFile.
 //    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<CachedFile<'a>> {
 //        let sized_file: InMemoryFile = InMemoryFile::open(path.as_ref())?;
@@ -42,13 +44,9 @@ impl <'a>CachedFile<'a> {
     /// without explicit ownership.
     /// This prevents copying the file, leading to a significant speedup.
     #[inline]
-    pub(crate) fn set_response_body<'b: 'a>(&'b self, response: &'b mut Response<'b>) {
-        response.set_streamed_body(self.file.bytes.as_slice())
-//        let file: *const InMemoryFile = Arc::into_raw(self.file);
-//        unsafe {
-//            response.set_streamed_body((*file).bytes.as_slice());
-//            let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
-//        }
+    pub(crate) fn set_response_body<'a, 'b: 'a>(&'a self, response: &'b mut Response) {
+//        response.set_streamed_body(self.file.lock().unwrap().bytes.as_slice())
+
     }
 }
 
@@ -60,7 +58,7 @@ impl <'a>CachedFile<'a> {
 /// extension, convert the `CachedFile` to a `File`, and respond with that instead.
 ///
 /// Based on NamedFile from rocket::response::NamedFile
-impl <'a,'b: 'a>Responder<'a> for CachedFile<'a> {
+impl <'a>Responder<'a> for CachedFile {
 
     fn respond_to(self, _: &Request) -> result::Result<Response<'a>, Status> {
         let mut response = Response::new();
@@ -70,8 +68,36 @@ impl <'a,'b: 'a>Responder<'a> for CachedFile<'a> {
             }
         }
 
-//        self.set_response_body(&mut response);
-        response.set_streamed_body(self.file.bytes.as_slice());
+
+        let file: *const Mutex<InMemoryFile> = Arc::into_raw(self.file);
+        unsafe {
+            response.set_streamed_body((*file).into_inner().unwrap().bytes.as_slice());
+            let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
+        }
+
+        Ok(response)
+    }
+}
+
+impl Responder<'static> for AltCachedFile {
+
+    fn respond_to(self, _: &Request) -> result::Result<Response<'static>, Status> {
+        let mut response = Response::new();
+        if let Some(ext) = self.path.extension() {
+            if let Some(ct) = ContentType::from_extension(&ext.to_string_lossy()) {
+                response.set_header(ct);
+            }
+        }
+
+        //        self.set_response_body(&mut response);
+//        response.set_streamed_body(self.file.bytes.as_slice());
+//        response.set_sized_body()
+        let file: *const InMemoryFile = Arc::into_raw(self.file);
+        unsafe {
+            response.set_streamed_body((*file).bytes.as_slice());
+            let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
+        }
+
 
         Ok(response)
     }

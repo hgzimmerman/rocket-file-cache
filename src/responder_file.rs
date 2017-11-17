@@ -7,25 +7,25 @@ use super::CachedFile;
 
 /// Wrapper around types that represent files and implement Responder<'static>.
 #[derive(Debug)]
-pub enum ResponderFile<'a> {
-    Cached(CachedFile<'a>),
+pub enum ResponderFile {
+    Cached(CachedFile),
     FileSystem(NamedFile)
 }
 
 
-impl <'a>From<CachedFile<'a>> for ResponderFile<'a> {
-    fn from(cached_file: CachedFile<'a>) -> ResponderFile<'a> {
+impl From<CachedFile> for ResponderFile {
+    fn from(cached_file: CachedFile) -> ResponderFile {
         ResponderFile::Cached(cached_file)
     }
 }
 
-impl <'a>From<NamedFile> for ResponderFile<'a> {
+impl From<NamedFile> for ResponderFile{
     fn from(named_file: NamedFile) -> Self {
         ResponderFile::FileSystem(named_file)
     }
 }
 
-impl <'a> Responder<'static> for ResponderFile<'static> {
+impl  Responder<'static> for ResponderFile {
     fn respond_to(self, request: &Request) -> Result<Response<'static>, Status> {
 
         match self {
