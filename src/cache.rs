@@ -694,6 +694,20 @@ mod tests {
                 }
             }
         }
+
+        fn get_in_memory_file(self) -> NamedInMemoryFile<'a>{
+            match self {
+                CachedFile::Cached(n) => n,
+                CachedFile::FileSystem(_) => panic!("tried to get cached file for named file")
+            }
+        }
+
+        fn get_named_file(self) -> NamedFile{
+            match self {
+                CachedFile::Cached(_) => panic!("tried to get named file for cached file"),
+                CachedFile::FileSystem(f) => f
+            }
+        }
     }
 
     #[bench]
@@ -918,20 +932,18 @@ mod tests {
         let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
         let named_file_1m_2 = NamedFile::open(path_1m.clone()).unwrap();
 
-//        let imf_5m = InMemoryFile::open(path_5m.clone()).unwrap();
-//        let mutex_imf_5 = Mutex::new(imf_5m);
-//        let cached_file_5m = NamedInMemoryFile::new(path_5m.clone(), mutex_imf_5.lock().unwrap());
-////        let cached_file_5m = CachedFile::open(path_5m.clone()).unwrap();
-////        let cached_file_1m = CachedFile::open(path_1m.clone()).unwrap();
-//        let imf_1m = InMemoryFile::open(path_1m.clone()).unwrap();
-//        let mutex_imf_1 = Mutex::new(imf_1m);
-//        let cached_file_1m = NamedInMemoryFile::new(path_1m.clone(), mutex_imf_1.lock().unwrap());
+
+        let imf_5m = InMemoryFile::open(path_5m.clone()).unwrap();
+        let imf_1m = InMemoryFile::open(path_1m.clone()).unwrap();
+
 
         let cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
 
         println!("0:\n{:#?}", cache);
-        assert!(
-            cache.try_insert(path_5m.clone()).is_ok()
+
+        assert_eq!(
+            cache.try_insert(path_5m.clone()).unwrap().get_in_memory_file().file.as_ref().get().as_ref(),
+            &imf_5m
         );
         println!("1:\n{:#?}", cache);
         assert_eq!(
@@ -944,9 +956,11 @@ mod tests {
             Ok(CachedFile::from(named_file_1m_2))
         );
         println!("3:\n{:#?}", cache);
-        assert!(
-            cache.try_insert( path_1m.clone() ).is_ok()
+        assert_eq!(
+            cache.try_insert( path_1m.clone()).unwrap().get_in_memory_file().file.as_ref().get().as_ref(),
+            &imf_1m
         );
+        println!("4:\n{:#?}", cache);
     }
 
 
@@ -1021,8 +1035,9 @@ mod tests {
 
 
         // expect the cache to get the item from the FS.
-        assert!(
-            cache.get(&path_5m).is_some()
+        assert_eq!(
+            cache.get(&path_5m).unwrap().get_in_memory_file().file.as_ref().get().as_ref(),
+            &imf
         );
 
         cache.remove(&path_5m);
