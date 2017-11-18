@@ -1,62 +1,75 @@
-use rocket::response::{Response, Responder};
-use rocket::http::{Status, ContentType};
+use rocket::http::Status;
+use rocket::response::{Response, Responder, NamedFile};
 use rocket::request::Request;
+use cache::Cache;
+use std::path::Path;
 
-use std::result;
-use std::sync::Arc;
-use std::path::{PathBuf,Path};
-use std::sync::{MutexGuard};
-
-use in_memory_file::InMemoryFile;
+use super::NamedInMemoryFile;
 
 
-/// A wrapper around an in-memory file.
-/// This struct is created when when a request to the cache is made.
-/// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
+/// Wrapper around types that represent files and implement Responder<'static>.
 #[derive(Debug)]
-pub struct CachedFile<'a> {
-    pub(crate) path: PathBuf,
-    pub(crate) file: Arc<MutexGuard<'a, InMemoryFile>>,
+pub enum CachedFile<'a> {
+    Cached(NamedInMemoryFile<'a>),
+    FileSystem(NamedFile)
+}
+
+impl <'a> CachedFile <'a> {
+    pub fn open<P: AsRef<Path>>(path: P, cache: &'a mut Cache ) -> Option<CachedFile<'a>> {
+        cache.get(path)
+    }
 }
 
 
-impl <'a>CachedFile<'a> {
-    /// Reads the file at the path into a CachedFile.
-    pub(crate) fn new<P: AsRef<Path>>(path: P, m: MutexGuard<'a, InMemoryFile>) -> CachedFile<'a> {
-        CachedFile {
-            path: path.as_ref().to_path_buf(),
-            file: Arc::new(m)
+impl <'a>From<NamedInMemoryFile<'a>> for CachedFile<'a> {
+    fn from(cached_file: NamedInMemoryFile<'a>) -> CachedFile<'a> {
+        CachedFile::Cached(cached_file)
+    }
+}
+
+impl From<NamedFile> for CachedFile<'static>{
+    fn from(named_file: NamedFile) -> Self {
+        CachedFile::FileSystem(named_file)
+    }
+}
+
+impl  <'a>Responder<'a> for CachedFile<'a> {
+    fn respond_to(self, request: &Request) -> Result<Response<'a>, Status> {
+
+        match self {
+            CachedFile::Cached(cached_file) => cached_file.respond_to(request),
+            CachedFile::FileSystem(named_file) => named_file.respond_to(request)
         }
     }
-    // TODO, create a macro that reads an in-memory-file, creates a mutex, and locks the file in the mutex, and creates the cached file.
 }
 
 
-/// Streams the cached file to the client. Sets or overrides the Content-Type in
-/// the response according to the file's extension if the extension is recognized.
-///
-/// If you would like to stream a file with a different Content-Type than that implied by its
-/// extension, convert the `CachedFile` to a `File`, and respond with that instead.
-///
-/// Based on NamedFile from rocket::response::NamedFile
-impl <'a>Responder<'a> for CachedFile<'a> {
-
-    fn respond_to(self, _: &Request) -> result::Result<Response<'a>, Status> {
-        let mut response = Response::new();
-        if let Some(ext) = self.path.extension() {
-            if let Some(ct) = ContentType::from_extension(&ext.to_string_lossy()) {
-                response.set_header(ct);
+impl <'a, 'b> PartialEq for CachedFile<'a> {
+    fn eq(&self, other: &CachedFile) -> bool {
+        match *self {
+            CachedFile::Cached(ref lhs_cached_file) => {
+                match *other {
+                    CachedFile::Cached(ref rhs_cached_file) => {
+                        use std::ops::Deref;
+                        (*rhs_cached_file.file).deref() == (*lhs_cached_file.file).deref()
+                    }
+                    CachedFile::FileSystem(_) => {
+                        false
+                    }
+                }
+            }
+            CachedFile::FileSystem(ref lhs_named_file) => {
+                match *other {
+                    CachedFile::Cached(_) => {
+                        false
+                    }
+                    CachedFile::FileSystem(ref rhs_named_file) => {
+                        // Since all we have is a file handle this will settle for just comparing the paths for now
+                        *lhs_named_file.path() == *rhs_named_file.path()
+                    }
+                }
             }
         }
 
-        unsafe {
-            let cloned_wrapper: *const MutexGuard<'a, InMemoryFile> =  Arc::into_raw(self.file);
-            response.set_streamed_body((*cloned_wrapper).bytes.as_slice());
-            let _ = Arc::from_raw(cloned_wrapper); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
-        }
-
-        Ok(response)
     }
 }
-
-
