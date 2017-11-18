@@ -145,15 +145,12 @@ impl Cache {
     /// use rocket::State;
     /// use std::sync::Arc;
     /// use std::sync::atomic::AtomicPtr;
-    /// use std::cell::UnsafeCell;
     ///
     ///
     /// #[get("/<file..>")]
-    /// fn files<'a>(file: PathBuf,  cache: State<'a, Arc<UnsafeCell<Cache>>> ) -> Option<CachedFile<'a>> {
+    /// fn files<'a>(file: PathBuf,  cache: State<'a, Cache> ) -> Option<CachedFile<'a>> {
     ///     let path: PathBuf = Path::new("www/").join(file).to_owned();
-    ///     unsafe {
-    ///         return (**cache.get()).get(path)
-    ///     }
+    ///     cache.inner().get(path)
     /// }
     /// # }
     /// ```
@@ -193,7 +190,7 @@ impl Cache {
     /// the file in the cache.
     /// The path will be used to find the new file in the filesystem and to find the old file to replace in
     /// the cache.
-    pub fn refresh<P: AsRef<Path>>(&mut self, path: P) -> bool {
+    pub fn refresh<P: AsRef<Path>>(&self, path: P) -> bool {
 
         let mut is_ok_to_refresh: bool = false;
 
@@ -249,7 +246,7 @@ impl Cache {
     /// cache.remove(&pathbuf);
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
-    pub fn remove<P: AsRef<Path>>(&mut self, path: P) {
+    pub fn remove<P: AsRef<Path>>(&self, path: P) {
         self.file_stats_map.lock().unwrap().remove(&path.as_ref().to_path_buf());
         self.file_map.remove(&path.as_ref().to_path_buf());
         self.access_count_map.remove(&path.as_ref().to_path_buf());
