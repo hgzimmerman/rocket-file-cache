@@ -5,15 +5,17 @@ extern crate rocket;
 extern crate rocket_file_cache;
 extern crate random_pool;
 
-use rocket_file_cache::{Cache, ResponderFile};
+use rocket_file_cache::{Cache, CachedFile};
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::path::{Path, PathBuf};
 use rocket::State;
 use random_pool::RandomPool;
+use std::sync::Arc;
+
 
 #[get("/<file..>")]
-fn files(file: PathBuf, cache_pool: State<RandomPool<Cache>> ) -> Option<ResponderFile> {
+fn files<'a>(file: PathBuf, cache_pool: State<'a, RandomPool<Cache>> ) -> Option<CachedFile<'a>> {
     let path: PathBuf = Path::new("www/").join(file).to_owned();
 
     // I am currently a little fuzzy about Rocket's threading model
@@ -21,7 +23,8 @@ fn files(file: PathBuf, cache_pool: State<RandomPool<Cache>> ) -> Option<Respond
     // of caches in the pool, than threads rocket is working with.
     // Assuming one thread per request, there will never be more locks taken out than there are
     // requests to be serviced, preventing a panic!() at the unwrap.
-    cache_pool.try_get().unwrap().get(&path)
+    CachedFile::open(path, &cache_pool.inner().try_get().unwrap())
+    // TODO this will not compile because the lock does not last long enough.
 }
 
 

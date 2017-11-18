@@ -15,12 +15,13 @@ use cached_file::CachedFile;
 
 use in_memory_file::InMemoryFile;
 use priority_function::{PriorityFunction, default_priority_function};
-use rocket::response::Responder;
 
-
-//use chashmap::CHashMap;
 use concurrent_hashmap::ConcHashMap;
 use std::collections::hash_map::RandomState;
+
+use std::fmt::Debug;
+use std::fmt;
+use std::fmt::Formatter;
 
 #[derive(Debug, PartialEq)]
 enum CacheInvalidationError {
@@ -43,16 +44,7 @@ pub struct FileStats {
     priority: usize
 }
 
-use std::fmt::Debug;
-use std::fmt;
-use std::fmt::Formatter;
-//use core::hash::BuildHasher;
-//
-//impl Debug for ConcHashMap<PathBuf, InMemoryFile, BuildHasher> {
-//    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-//        fmt.debug_map().entries(self.iter().map(|&(ref k, ref v)| (k, v))).finish()
-//    }
-//}
+
 
 /// The cache holds a number of files whose bytes fit into its size_limit.
 /// The cache acts as a proxy to the filesystem, returning cached files if they are in the cache,
@@ -159,25 +151,16 @@ impl Cache {
         // First, try to get the file in the cache that corresponds to the desired path.
 
         if self.contains_key(&path.as_ref().to_path_buf()) {
-            {
-                self.increment_access_count(&path);
-            } // File is in the cache, increment the count
-            {
-                self.update_stats(&path);
-            }
+                // File is in the cache, increment the count
+            self.increment_access_count(&path);
+            self.update_stats(&path);
+
         } else {
             return self.try_insert(path).ok();
         }
 
-//        if let Some(cache_file) = self.get_from_cache(&path) {
-//            debug!("Cache hit for file: {:?}", path.as_ref());
-//            return Some(ResponderFile::from(cache_file));
-//        }
-
         Some(CachedFile::from(self.get_from_cache(&path).unwrap()))
     }
-
-
 
 
     /// If a file has changed on disk, the cache will not automatically know that a change has occurred.
@@ -715,7 +698,7 @@ mod tests {
 
     #[bench]
     fn cache_get_10mb(b: &mut Bencher) {
-        let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
+        let cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
         cache.get(&path_10m); // add the 10 mb file to the cache
@@ -728,7 +711,7 @@ mod tests {
 
     #[bench]
     fn cache_miss_10mb(b: &mut Bencher) {
-        let mut cache: Cache = Cache::new(0);
+        let cache: Cache = Cache::new(0);
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
@@ -750,7 +733,7 @@ mod tests {
 
     #[bench]
     fn cache_get_1mb(b: &mut Bencher) {
-        let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
+        let cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
         cache.get(&path_1m); // add the 10 mb file to the cache
@@ -763,7 +746,7 @@ mod tests {
 
     #[bench]
     fn cache_miss_1mb(b: &mut Bencher) {
-        let mut cache: Cache = Cache::new(0);
+        let cache: Cache = Cache::new(0);
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
@@ -788,7 +771,7 @@ mod tests {
 
     #[bench]
     fn cache_get_5mb(b: &mut Bencher) {
-        let mut cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
+        let cache: Cache = Cache::new(MEG1 *20); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
         cache.get(&path_5m); // add the 10 mb file to the cache
@@ -801,7 +784,7 @@ mod tests {
 
     #[bench]
     fn cache_miss_5mb(b: &mut Bencher) {
-        let mut cache: Cache = Cache::new(0);
+        let cache: Cache = Cache::new(0);
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
@@ -827,7 +810,7 @@ mod tests {
     fn cache_get_1mb_from_1000_entry_cache(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-        let mut cache: Cache = Cache::new(MEG1 *3); //Cache can hold 3Mb
+        let cache: Cache = Cache::new(MEG1 *3); //Cache can hold 3Mb
         cache.get(&path_1m); // add the file to the cache
 
         // Add 1024 1kib files to the cache.
@@ -851,7 +834,7 @@ mod tests {
     fn cache_miss_1mb_from_1000_entry_cache(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-        let mut cache: Cache = Cache::new(MEG1 ); //Cache can hold 1Mb
+        let cache: Cache = Cache::new(MEG1 ); //Cache can hold 1Mb
 
         // Add 1024 1kib files to the cache.
         for i in 0..1024 {
@@ -875,7 +858,7 @@ mod tests {
     fn cache_miss_5mb_from_1000_entry_cache(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG1);
-        let mut cache: Cache = Cache::new(MEG5 ); //Cache can hold 1Mb
+        let cache: Cache = Cache::new(MEG5 ); //Cache can hold 1Mb
 
         // Add 1024 5kib files to the cache.
         for i in 0..1024 {
@@ -911,7 +894,7 @@ mod tests {
 
     #[test]
     fn file_exceeds_size_limit() {
-        let mut cache: Cache = Cache::new(MEG1 * 8); // Cache can hold only 8Mb
+        let cache: Cache = Cache::new(MEG1 * 8); // Cache can hold only 8Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
@@ -944,7 +927,7 @@ mod tests {
         let mutex_imf_1 = Mutex::new(imf_1m);
         let cached_file_1m = NamedInMemoryFile::new(path_1m.clone(), mutex_imf_1.lock().unwrap());
 
-        let mut cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
+        let cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
 
         println!("0:\n{:#?}", cache);
         assert_eq!(
@@ -993,7 +976,7 @@ mod tests {
 
         let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
 
-        let mut cache: Cache = Cache::new(MEG1 * 7 + 2000);
+        let cache: Cache = Cache::new(MEG1 * 7 + 2000);
 
         println!("1:\n{:#?}", cache);
         assert_eq!(
@@ -1045,7 +1028,7 @@ mod tests {
 
     #[test]
     fn remove_file() {
-        let mut cache: Cache = Cache::new(MEG1 * 10);
+        let cache: Cache = Cache::new(MEG1 * 10);
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
         let path_10m: PathBuf = create_test_file(&temp_dir, MEG10, FILE_MEG10);
@@ -1056,8 +1039,6 @@ mod tests {
         let cached_file: NamedInMemoryFile = NamedInMemoryFile::new(path_5m.clone(), mutex_imf.lock().unwrap());
 
 
-
-
         // expect the cache to get the item from the FS.
         assert_eq!(
             cache.get(&path_5m),
@@ -1066,12 +1047,12 @@ mod tests {
 
         cache.remove(&path_5m);
 
-        assert!(cache.contains_key(&path_5m.clone()) == false);
+        assert_eq!(cache.contains_key(&path_5m.clone()), false);
     }
 
     #[test]
     fn refresh_file() {
-        let mut cache: Cache = Cache::new(MEG1 * 10);
+        let cache: Cache = Cache::new(MEG1 * 10);
 
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);

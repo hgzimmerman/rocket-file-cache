@@ -15,7 +15,7 @@ pub enum CachedFile<'a> {
 }
 
 impl <'a> CachedFile <'a> {
-    pub fn open<P: AsRef<Path>>(path: P, cache: &'a mut Cache ) -> Option<CachedFile<'a>> {
+    pub fn open<P: AsRef<Path>>(path: P, cache: &'a Cache ) -> Option<CachedFile<'a>> {
         cache.get(path)
     }
 }
