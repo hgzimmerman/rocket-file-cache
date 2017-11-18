@@ -9,20 +9,32 @@ use std::sync::{MutexGuard};
 
 use in_memory_file::InMemoryFile;
 
+use concurrent_hashmap::Accessor;
+
+use std::fmt::{Formatter, Debug};
+use std::fmt;
+
 
 /// A wrapper around an in-memory file.
 /// This struct is created when when a request to the cache is made.
 /// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
-#[derive(Debug)]
+//#[derive(Debug)]
 pub struct NamedInMemoryFile<'a> {
     pub(crate) path: PathBuf,
-    pub(crate) file: Arc<MutexGuard<'a, InMemoryFile>>,
+    pub(crate) file: Arc<Accessor<'a, PathBuf, Arc<InMemoryFile>>>,
+}
+
+
+impl<'a> Debug for NamedInMemoryFile<'a> {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        write!(fmt, "path: {:?}, file: {:?}", self.path, self.file.get())
+    }
 }
 
 
 impl <'a> NamedInMemoryFile<'a> {
     /// Reads the file at the path into a CachedFile.
-    pub(crate) fn new<P: AsRef<Path>>(path: P, m: MutexGuard<'a, InMemoryFile>) -> NamedInMemoryFile<'a> {
+    pub(crate) fn new<P: AsRef<Path>>(path: P, m: Accessor<'a, PathBuf, Arc<InMemoryFile>>) -> NamedInMemoryFile<'a> {
         NamedInMemoryFile {
             path: path.as_ref().to_path_buf(),
             file: Arc::new(m)
@@ -50,8 +62,8 @@ impl <'a>Responder<'a> for NamedInMemoryFile<'a> {
         }
 
         unsafe {
-            let cloned_wrapper: *const MutexGuard<'a, InMemoryFile> =  Arc::into_raw(self.file);
-            response.set_streamed_body((*cloned_wrapper).bytes.as_slice());
+            let cloned_wrapper: *const Accessor<'a, PathBuf, Arc<InMemoryFile>> =  Arc::into_raw(self.file);
+            response.set_streamed_body((*cloned_wrapper).get().bytes.as_slice());
             let _ = Arc::from_raw(cloned_wrapper); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
         }
 

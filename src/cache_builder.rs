@@ -140,7 +140,7 @@ impl CacheBuilder {
                 min_file_size,
                 max_file_size,
                 priority_function,
-                file_map: ConcHashMap::<PathBuf, Arc<Mutex<InMemoryFile>>, RandomState>::new(),
+                file_map: ConcHashMap::<PathBuf, Arc<InMemoryFile>, RandomState>::new(),
                 file_stats_map: Mutex::new(HashMap::new()),
                 access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
             }
