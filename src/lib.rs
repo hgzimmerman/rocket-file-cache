@@ -4,6 +4,8 @@ extern crate rocket;
 #[macro_use]
 extern crate log;
 
+//extern crate chashmap;
+extern crate concurrent_hashmap;
 
 mod cache;
 mod in_memory_file;

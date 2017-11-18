@@ -18,6 +18,9 @@ use priority_function::{PriorityFunction, default_priority_function};
 use rocket::response::Responder;
 
 
+//use chashmap::CHashMap;
+use concurrent_hashmap::ConcHashMap;
+use std::collections::hash_map::RandomState;
 
 #[derive(Debug, PartialEq)]
 enum CacheInvalidationError {
@@ -40,6 +43,17 @@ pub struct FileStats {
     priority: usize
 }
 
+use std::fmt::Debug;
+use std::fmt;
+use std::fmt::Formatter;
+//use core::hash::BuildHasher;
+//
+//impl Debug for ConcHashMap<PathBuf, InMemoryFile, BuildHasher> {
+//    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+//        fmt.debug_map().entries(self.iter().map(|&(ref k, ref v)| (k, v))).finish()
+//    }
+//}
+
 /// The cache holds a number of files whose bytes fit into its size_limit.
 /// The cache acts as a proxy to the filesystem, returning cached files if they are in the cache,
 /// or reading a file directly from the filesystem if the file is not in the cache.
@@ -59,20 +73,26 @@ pub struct FileStats {
 /// This will repeat until either enough space can be freed for the new file, and the new file is
 /// inserted, or until the priority of the cached files is greater than that of the new file,
 /// in which case, the new file isn't inserted.
-#[derive(Debug)]
+//#[derive(Debug)]
 pub struct Cache {
     /// The number of bytes the file_map should be able hold at once.
     pub size_limit: usize,
     pub min_file_size: usize, // The minimum size file that can be added to the cache
     pub max_file_size: usize, // The maximum size file that can be added to the cache
     pub priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
-    pub(crate) file_map: HashMap<PathBuf, Arc<Mutex<InMemoryFile>>>, // Holds the files that the cache is caching
+    pub(crate) file_map: ConcHashMap<PathBuf, Arc<Mutex<InMemoryFile>>, RandomState>, // Holds the files that the cache is caching
     pub(crate) file_stats_map: Mutex<HashMap<PathBuf, FileStats>>, // Holds stats for only the files in the file map.
-    pub(crate) access_count_map: HashMap<PathBuf, AtomicUsize>, // Every file that is accessed will have the number of times it is accessed logged in this map.
+    pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
 unsafe impl Send for Cache {}
 unsafe impl Sync for Cache {}
+
+impl Debug for Cache {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        fmt.debug_map().entries(self.file_map.iter().map(|(ref k, ref v)| (k.clone(), v.clone()))).finish()
+    }
+}
 
 impl Cache {
     /// Creates a new Cache with the given size limit and the default priority function.
@@ -89,14 +109,15 @@ impl Cache {
     /// let mut cache = Cache::new(1024 * 1024 * 30); // Create a cache that can hold 30 MB of files
     /// ```
     pub fn new(size_limit: usize) -> Cache {
+
         Cache {
             size_limit,
             min_file_size: 0,
             max_file_size: usize::MAX,
             priority_function: default_priority_function,
-            file_map: HashMap::new(),
+            file_map: ConcHashMap::<PathBuf, Arc<Mutex<InMemoryFile>>, RandomState>::new(),
             file_stats_map: Mutex::new(HashMap::new()),
-            access_count_map: HashMap::new(),
+            access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
         }
     }
 
@@ -136,11 +157,11 @@ impl Cache {
     /// }
     /// # }
     /// ```
-    pub fn get<'a, P: AsRef<Path>>(&'a mut self, path: P) -> Option<CachedFile<'a>> {
+    pub fn get<'a, P: AsRef<Path>>(&'a self, path: P) -> Option<CachedFile<'a>> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
 
-        if self.file_map.contains_key(&path.as_ref().to_path_buf()) {
+        if self.contains_key(&path.as_ref().to_path_buf()) {
             {
                 self.increment_access_count(&path);
             } // File is in the cache, increment the count
@@ -177,7 +198,7 @@ impl Cache {
         let mut is_ok_to_refresh: bool = false;
 
         // Check if the file exists in the cache
-        if self.file_map.contains_key(&path.as_ref().to_path_buf())  {
+        if self.contains_key(&path.as_ref().to_path_buf())  {
             // See if the new file exists.
             let path_string: String = match path.as_ref().to_str() {
                 Some(s) => String::from(s),
@@ -231,10 +252,7 @@ impl Cache {
     pub fn remove<P: AsRef<Path>>(&mut self, path: P) {
         self.file_stats_map.lock().unwrap().remove(&path.as_ref().to_path_buf());
         self.file_map.remove(&path.as_ref().to_path_buf());
-        let entry = self.access_count_map.entry(path.as_ref().to_path_buf()).or_insert(
-            AtomicUsize::new(0)
-        );
-        entry.store(0, Ordering::Relaxed);
+        self.access_count_map.remove(&path.as_ref().to_path_buf());
     }
 
     /// Returns a boolean indicating if the cache has an entry corresponding to the given key.
@@ -255,7 +273,7 @@ impl Cache {
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
     pub fn contains_key<P: AsRef<Path>>(&self, path: P) -> bool {
-        self.file_map.contains_key(&path.as_ref().to_path_buf())
+        self.file_map.find(&path.as_ref().to_path_buf()).is_some()
     }
 
 
@@ -278,12 +296,12 @@ impl Cache {
     /// cache.alter_access_count(&pathbuf, | x | { 0 }); // Set the access count to 0.
     /// ```
     ///
-    pub fn alter_access_count<P: AsRef<Path>>(&mut self, path: P, alter_count_function: fn(&usize) -> usize ) -> bool {
+    pub fn alter_access_count<P: AsRef<Path>>(&self, path: P, alter_count_function: fn(&usize) -> usize ) -> bool {
         let new_count: usize;
         {
-            match self.access_count_map.get(&path.as_ref().to_path_buf()) {
+            match self.access_count_map.find(&path.as_ref().to_path_buf()) {
                 Some(access_count_entry) => {
-                    new_count = alter_count_function(&access_count_entry.load(Ordering::Relaxed));
+                    new_count = alter_count_function(&access_count_entry.get().load(Ordering::Relaxed));
                 }
                 None => return false // Can't update a file that isn't listed.
             }
@@ -318,7 +336,7 @@ impl Cache {
     /// cache.alter_all_access_counts(| x | { x / 2 });
     /// ```
     ///
-    pub fn alter_all_access_counts(&mut self, alter_count_function: fn(&usize) -> usize ) {
+    pub fn alter_all_access_counts(&self, alter_count_function: fn(&usize) -> usize ) {
         let all_counts: Vec<PathBuf>;
         {
             all_counts = self.access_count_map
@@ -391,7 +409,7 @@ impl Cache {
     /// look up the location of the file in the filesystem if the file is not in the cache.
     ///
     ///
-    fn try_insert<P: AsRef<Path>>(&mut self, path: P) -> Result<CachedFile, CacheInvalidationError> {
+    fn try_insert<P: AsRef<Path>>(& self, path: P) -> Result<CachedFile, CacheInvalidationError> {
         let path: PathBuf = path.as_ref().to_path_buf();
         trace!("Trying to insert file {:?}", path);
 
@@ -428,7 +446,7 @@ impl Cache {
 
                     let cached_file = NamedInMemoryFile {
                         path: path.clone(),
-                        file: Arc::new(self.file_map.get(&path).unwrap().lock().unwrap())
+                        file: Arc::new(self.file_map.find(&path).unwrap().get().lock().unwrap())
                     };
 
 
@@ -452,7 +470,10 @@ impl Cache {
             let new_file_priority: usize;
             {
                 let default_atomic_access_count = AtomicUsize::new(1);
-                let new_file_access_count: &AtomicUsize = self.access_count_map.get(&path).unwrap_or(&default_atomic_access_count);
+                let new_file_access_count: &AtomicUsize = match self.access_count_map.find(&path) {
+                    Some(access_count) => &access_count.get(),
+                    None => &default_atomic_access_count
+                };
                 new_file_priority = (self.priority_function)(new_file_access_count.load(Ordering::Relaxed), size);
             }
 
@@ -479,7 +500,7 @@ impl Cache {
 
                             let cached_file = NamedInMemoryFile {
                                 path: path.clone(),
-                                file: Arc::new(self.file_map.get(&path).unwrap().lock().unwrap())
+                                file: Arc::new(self.file_map.find(&path).unwrap().get().lock().unwrap())
                             };
 
 
@@ -521,7 +542,7 @@ impl Cache {
     /// * `required_space` - A `usize` representing the number of bytes that must be freed to make room for a new file.
     /// * `new_file_priority` - A `usize` representing the priority of the new file to be added. If the priority of the files possibly being removed
     /// is greater than this value, then the files won't be removed.
-    fn make_room_for_new_file(&mut self, required_space: usize, new_file_priority: usize) -> Result<Vec<PathBuf>, CacheInvalidationError> {
+    fn make_room_for_new_file(&self, required_space: usize, new_file_priority: usize) -> Result<Vec<PathBuf>, CacheInvalidationError> {
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec![];
@@ -552,12 +573,12 @@ impl Cache {
     }
 
     ///Helper function that gets the file from the cache if it exists there.
-    fn get_from_cache<P: AsRef<Path>>(&mut self, path: P) -> Option<NamedInMemoryFile> {
-        match self.file_map.get(&path.as_ref().to_path_buf()) {
+    fn get_from_cache<P: AsRef<Path>>(&self, path: P) -> Option<NamedInMemoryFile> {
+        match self.file_map.find(&path.as_ref().to_path_buf()) {
             Some(in_memory_file) => {
                 Some(NamedInMemoryFile {
                     path: path.as_ref().to_path_buf(),
-                    file: Arc::new(in_memory_file.lock().unwrap()), // Not too sure about creating another ARC here, or the clone().
+                    file: Arc::new(in_memory_file.get().lock().unwrap()), // Not too sure about creating another ARC here, or the clone().
                 })
             }
             None => None, // File not found
@@ -568,27 +589,26 @@ impl Cache {
     /// Helper function for incrementing the access count for a given file name.
     ///
     /// This should only be used in cases where the file is known to exist, to avoid bloating the access count map with useless values.
-    fn increment_access_count<P: AsRef<Path>>(&mut self, path: P) {
-        let access_count: &mut AtomicUsize = self.access_count_map.entry(path.as_ref().to_path_buf()).or_insert(
-            // By default, the count and priority will be 0.
-            // The count will immediately be incremented, and the score can't be calculated without the size of the file in question.
-            // Therefore, files not in the cache MUST have their priority score calculated on insertion attempt.
-            AtomicUsize::new(0usize)
+    fn increment_access_count<P: AsRef<Path>>(& self, path: P) {
+        self.access_count_map.upsert(path.as_ref().to_path_buf(),
+            AtomicUsize::new(1), // insert 1 if nothing at key
+            &|access_count| access_count.store(access_count.load(Ordering::Relaxed) + 1, Ordering::Relaxed) // increment by 1 if key found
         );
-        access_count.store(access_count.load(Ordering::Relaxed) + 1, Ordering::Relaxed)
-//        *access_count = access_count + 1; // Increment the access count
     }
 
 
     /// Update the stats associated with this file.
-    fn update_stats<P: AsRef<Path>>(&mut self, path: P) {
-        let size: usize = match self.file_map.get(&path.as_ref().to_path_buf()){
-            Some(in_memory_file) => in_memory_file.as_ref().lock().unwrap().size,
+    fn update_stats<P: AsRef<Path>>(&self, path: P) {
+        let size: usize = match self.file_map.find(&path.as_ref().to_path_buf()){
+            Some(in_memory_file) => in_memory_file.get().lock().unwrap().size,
             None => Cache::get_file_size_from_metadata(&path.as_ref().to_path_buf()).unwrap_or(0)
         };
 
         let default_atomic_access_count = AtomicUsize::new(1);
-        let access_count: &AtomicUsize = self.access_count_map.get(&path.as_ref().to_path_buf()).unwrap_or(&default_atomic_access_count).clone();
+        let access_count: &AtomicUsize = match self.access_count_map.find(&path.as_ref().to_path_buf()) {
+            Some(access_count) => access_count.get(),
+            None => &default_atomic_access_count
+        };
 
         let mut locked_stats_map = self.file_stats_map.lock().unwrap();
         let stats: &mut FileStats = locked_stats_map.entry(path.as_ref().to_path_buf()).or_insert(

@@ -5,6 +5,14 @@ use priority_function::{PriorityFunction, default_priority_function};
 use std::usize;
 use std::sync::Mutex;
 
+//use chashmap::CHashMap;
+use concurrent_hashmap::ConcHashMap;
+use std::collections::hash_map::RandomState;
+use std::sync::atomic::AtomicUsize;
+use std::path::PathBuf;
+use in_memory_file::InMemoryFile;
+use std::sync::Arc;
+
 
 /// Error types that can be encountered when a cache is built.
 #[derive(Debug, PartialEq)]
@@ -132,9 +140,9 @@ impl CacheBuilder {
                 min_file_size,
                 max_file_size,
                 priority_function,
-                file_map: HashMap::new(),
+                file_map: ConcHashMap::<PathBuf, Arc<Mutex<InMemoryFile>>, RandomState>::new(),
                 file_stats_map: Mutex::new(HashMap::new()),
-                access_count_map: HashMap::new()
+                access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
             }
         )
 
