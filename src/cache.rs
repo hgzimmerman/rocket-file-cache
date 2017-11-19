@@ -78,8 +78,8 @@ impl Debug for Cache {
 }
 
 impl Cache {
-    /// Creates a new Cache with the given size limit and the default priority function.
-    /// More settings can be set by using the CacheBuilder instead.
+    /// Creates a new Cache with the given size limit, no limits on individual file size, and the default priority function.
+    /// These settings can be set by using the CacheBuilder instead.
     ///
     /// # Arguments
     ///
@@ -104,6 +104,9 @@ impl Cache {
 
     /// Either gets the file from the cache if it exists there, gets it from the filesystem and
     /// tries to cache it, or fails to find the file and returns None.
+    ///
+    /// The CachedFile that is returned takes a lock out on that file in the cache.
+    /// This lock will release when the CachedFile goes out of scope.
     ///
     /// # Arguments
     ///
@@ -219,7 +222,6 @@ impl Cache {
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
     pub fn remove<P: AsRef<Path>>(&self, path: P) {
-//        self.file_stats_map.lock().unwrap().remove(&path.as_ref().to_path_buf());
         self.file_map.remove(&path.as_ref().to_path_buf());
         self.access_count_map.remove(&path.as_ref().to_path_buf());
     }
@@ -413,12 +415,6 @@ impl Cache {
                     self.update_stats(&path);
 
                     let cached_file = NamedInMemoryFile::new(path.clone(), self.file_map.find(&path).unwrap());
-//                    {
-//                        path: path.clone(),
-//                        file: Arc::new(self.file_map.find(&path).unwrap().get().lock().unwrap())
-//                    };
-
-
 
                     return Ok(CachedFile::from(cached_file))
                 }
@@ -459,11 +455,8 @@ impl Cache {
                                 // The file was accessed with this key earlier when sorting priorities.
                                 // Unwrapping be safe.
                                 let _ = self.file_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
-//                                let _ = self.file_stats_map.lock().unwrap().remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
                             }
 
-
-//                            let arc_mutex_file: Arc<InMemoryFile> = Arc::new(file);
                             self.file_map.insert(path.clone(), file);
                             self.update_stats(&path);
 
