@@ -5,7 +5,6 @@ use rocket::request::Request;
 use std::result;
 use std::sync::Arc;
 use std::path::{PathBuf,Path};
-use std::sync::{MutexGuard};
 
 use in_memory_file::InMemoryFile;
 

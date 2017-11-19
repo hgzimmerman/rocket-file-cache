@@ -1,24 +1,16 @@
 use std::path::{PathBuf, Path};
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::usize;
 use rocket::response::NamedFile;
 use std::fs::Metadata;
 use std::fs;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-
 use named_in_memory_file::NamedInMemoryFile;
-//use cached_file::AltCachedFile;
 use cached_file::CachedFile;
-
 use in_memory_file::InMemoryFile;
 use priority_function::{PriorityFunction, default_priority_function};
-
 use concurrent_hashmap::ConcHashMap;
 use std::collections::hash_map::RandomState;
-
 use std::fmt::Debug;
 use std::fmt;
 use std::fmt::Formatter;
@@ -645,10 +637,9 @@ mod tests {
     use std::fs::File;
     use rocket::response::NamedFile;
     use std::io::Read;
-    use std::sync::MutexGuard;
-    use std::sync::Mutex;
     use in_memory_file::InMemoryFile;
     use concurrent_hashmap::Accessor;
+    use std::sync::Arc;
 
 
     const MEG1: usize = 1024 * 1024;
@@ -696,13 +687,6 @@ mod tests {
             match self {
                 CachedFile::Cached(n) => n,
                 CachedFile::FileSystem(_) => panic!("tried to get cached file for named file")
-            }
-        }
-
-        fn get_named_file(self) -> NamedFile{
-            match self {
-                CachedFile::Cached(_) => panic!("tried to get named file for cached file"),
-                CachedFile::FileSystem(f) => f
             }
         }
     }
@@ -984,6 +968,7 @@ mod tests {
 
         let cache: Cache = Cache::new(MEG1 * 7 + 2000);
 
+        // TODO change these to useful assert_eq!s
         println!("1:\n{:#?}", cache);
         assert!(
             cache.get(&path_5m).is_some()
@@ -1033,9 +1018,7 @@ mod tests {
         let cache: Cache = Cache::new(MEG1 * 10);
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
-        let path_10m: PathBuf = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
-        let named_file: NamedFile = NamedFile::open(path_5m.clone()).unwrap();
         let mut imf     : InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
 
         // Set the expected values for the stats in IMF.

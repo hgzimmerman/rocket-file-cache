@@ -1,17 +1,13 @@
 use cache::Cache;
 
-use std::collections::HashMap;
 use priority_function::{PriorityFunction, default_priority_function};
 use std::usize;
-use std::sync::Mutex;
 
-//use chashmap::CHashMap;
 use concurrent_hashmap::ConcHashMap;
 use std::collections::hash_map::RandomState;
 use std::sync::atomic::AtomicUsize;
 use std::path::PathBuf;
 use in_memory_file::InMemoryFile;
-use std::sync::Arc;
 
 
 /// Error types that can be encountered when a cache is built.
@@ -151,7 +147,6 @@ impl CacheBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path};
 
     #[test]
     fn no_size_error(){

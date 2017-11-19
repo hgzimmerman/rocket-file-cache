@@ -50,7 +50,6 @@ impl <'a, 'b> PartialEq for CachedFile<'a> {
             CachedFile::Cached(ref lhs_cached_file) => {
                 match *other {
                     CachedFile::Cached(ref rhs_cached_file) => {
-                        use std::ops::Deref;
                         (*rhs_cached_file.file).get() == (*lhs_cached_file.file).get()
                     }
                     CachedFile::FileSystem(_) => {
