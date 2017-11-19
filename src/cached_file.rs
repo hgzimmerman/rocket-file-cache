@@ -33,7 +33,7 @@ impl From<NamedFile> for CachedFile<'static>{
     }
 }
 
-impl  <'a>Responder<'a> for CachedFile<'a> {
+impl <'a>Responder<'a> for CachedFile<'a> {
     fn respond_to(self, request: &Request) -> Result<Response<'a>, Status> {
 
         match self {

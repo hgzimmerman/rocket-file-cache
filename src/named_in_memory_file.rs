@@ -21,7 +21,7 @@ use std::fmt;
 //#[derive(Debug)]
 pub struct NamedInMemoryFile<'a> {
     pub(crate) path: PathBuf,
-    pub(crate) file: Arc<Accessor<'a, PathBuf, Arc<InMemoryFile>>>,
+    pub(crate) file: Arc<Accessor<'a, PathBuf, InMemoryFile>>,
 }
 
 
@@ -34,7 +34,7 @@ impl<'a> Debug for NamedInMemoryFile<'a> {
 
 impl <'a> NamedInMemoryFile<'a> {
     /// Reads the file at the path into a CachedFile.
-    pub(crate) fn new<P: AsRef<Path>>(path: P, m: Accessor<'a, PathBuf, Arc<InMemoryFile>>) -> NamedInMemoryFile<'a> {
+    pub(crate) fn new<P: AsRef<Path>>(path: P, m: Accessor<'a, PathBuf, InMemoryFile>) -> NamedInMemoryFile<'a> {
         NamedInMemoryFile {
             path: path.as_ref().to_path_buf(),
             file: Arc::new(m)
@@ -62,7 +62,7 @@ impl <'a>Responder<'a> for NamedInMemoryFile<'a> {
         }
 
         unsafe {
-            let cloned_wrapper: *const Accessor<'a, PathBuf, Arc<InMemoryFile>> =  Arc::into_raw(self.file);
+            let cloned_wrapper: *const Accessor<'a, PathBuf, InMemoryFile> =  Arc::into_raw(self.file);
             response.set_streamed_body((*cloned_wrapper).get().bytes.as_slice());
             let _ = Arc::from_raw(cloned_wrapper); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
         }

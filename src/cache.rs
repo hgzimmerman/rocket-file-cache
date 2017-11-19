@@ -72,7 +72,7 @@ pub struct Cache {
     pub min_file_size: usize, // The minimum size file that can be added to the cache
     pub max_file_size: usize, // The maximum size file that can be added to the cache
     pub priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
-    pub(crate) file_map: ConcHashMap<PathBuf, Arc<InMemoryFile>, RandomState>, // Holds the files that the cache is caching
+    pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
     pub(crate) file_stats_map: Mutex<HashMap<PathBuf, FileStats>>, // Holds stats for only the files in the file map.
     pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
@@ -101,13 +101,12 @@ impl Cache {
     /// let mut cache = Cache::new(1024 * 1024 * 30); // Create a cache that can hold 30 MB of files
     /// ```
     pub fn new(size_limit: usize) -> Cache {
-
         Cache {
             size_limit,
             min_file_size: 0,
             max_file_size: usize::MAX,
             priority_function: default_priority_function,
-            file_map: ConcHashMap::<PathBuf, Arc<InMemoryFile>, RandomState>::new(),
+            file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
             file_stats_map: Mutex::new(HashMap::new()),
             access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
         }
@@ -199,7 +198,7 @@ impl Cache {
                 debug!("Refreshing file: {:?}", path.as_ref());
                 {
                     self.file_map.remove(&path.as_ref().to_path_buf());
-                    self.file_map.insert(path.as_ref().to_path_buf(), Arc::new(new_file) );
+                    self.file_map.insert(path.as_ref().to_path_buf(), new_file);
                 }
 
                 self.update_stats(path)
@@ -418,8 +417,7 @@ impl Cache {
             debug!("Cache has room for the file.");
             match InMemoryFile::open(path.as_path()) {
                 Ok(file) => {
-                    let arc_file: Arc<InMemoryFile> = Arc::new(file);
-                    self.file_map.insert(path.clone(), arc_file.clone());
+                    self.file_map.insert(path.clone(), file);
 
                     self.increment_access_count(&path);
                     self.update_stats(&path);
@@ -475,11 +473,11 @@ impl Cache {
                             }
 
 
-                            let arc_mutex_file: Arc<InMemoryFile> = Arc::new(file);
-                            self.file_map.insert(path.clone(), arc_mutex_file.clone());
+//                            let arc_mutex_file: Arc<InMemoryFile> = Arc::new(file);
+                            self.file_map.insert(path.clone(), file);
                             self.update_stats(&path);
 
-                            let cached_file = NamedInMemoryFile:: new(path.clone(), self.file_map.find(&path).unwrap());
+                            let cached_file: NamedInMemoryFile = NamedInMemoryFile:: new(path.clone(), self.file_map.find(&path).unwrap());
 
                             return Ok(CachedFile::from(cached_file))
                         }
@@ -677,16 +675,10 @@ mod tests {
             match self {
                 CachedFile::Cached(cached_file) => {
                     unsafe {
-                        let file: *const Accessor<'a, PathBuf, Arc<InMemoryFile>> =  Arc::into_raw(cached_file.file);
+                        let file: *const Accessor<'a, PathBuf, InMemoryFile> =  Arc::into_raw(cached_file.file);
                         let _ = (*file).get().bytes.clone();
                         let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
                     }
-
-//                    let file: *const MutexGuard<'a, InMemoryFile> = Arc::into_raw(cached_file.file);
-//                    unsafe {
-//                        let _ = (*file).bytes.clone();
-//                        let _ = Arc::from_raw(file); // Prevent dangling pointer?
-//                    }
                 }
                 CachedFile::FileSystem(mut named_file) => {
                     let mut v :Vec<u8> = Vec::new();
@@ -942,7 +934,7 @@ mod tests {
         println!("0:\n{:#?}", cache);
 
         assert_eq!(
-            cache.try_insert(path_5m.clone()).unwrap().get_in_memory_file().file.as_ref().get().as_ref(),
+            cache.try_insert(path_5m.clone()).unwrap().get_in_memory_file().file.as_ref().get(),
             &imf_5m
         );
         println!("1:\n{:#?}", cache);
@@ -957,7 +949,7 @@ mod tests {
         );
         println!("3:\n{:#?}", cache);
         assert_eq!(
-            cache.try_insert( path_1m.clone()).unwrap().get_in_memory_file().file.as_ref().get().as_ref(),
+            cache.try_insert( path_1m.clone()).unwrap().get_in_memory_file().file.as_ref().get(),
             &imf_1m
         );
         println!("4:\n{:#?}", cache);
@@ -1036,7 +1028,7 @@ mod tests {
 
         // expect the cache to get the item from the FS.
         assert_eq!(
-            cache.get(&path_5m).unwrap().get_in_memory_file().file.as_ref().get().as_ref(),
+            cache.get(&path_5m).unwrap().get_in_memory_file().file.as_ref().get(),
             &imf
         );
 
