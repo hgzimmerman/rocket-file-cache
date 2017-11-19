@@ -39,9 +39,9 @@ pub struct AccessCountAndPriority {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FileStats {
-    size: usize,
-    access_count: usize,
-    priority: usize
+    pub(crate) size: usize,
+    pub(crate) access_count: usize,
+    pub(crate) priority: usize
 }
 
 
@@ -73,7 +73,6 @@ pub struct Cache {
     pub max_file_size: usize, // The maximum size file that can be added to the cache
     pub priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
-    pub(crate) file_stats_map: Mutex<HashMap<PathBuf, FileStats>>, // Holds stats for only the files in the file map.
     pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
@@ -107,7 +106,6 @@ impl Cache {
             max_file_size: usize::MAX,
             priority_function: default_priority_function,
             file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
-            file_stats_map: Mutex::new(HashMap::new()),
             access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
         }
     }
@@ -185,8 +183,8 @@ impl Cache {
             };
             if let Ok(metadata) = fs::metadata(path_string.as_str()) {
                 if metadata.is_file() {
-                    // If the stats for the old file exist
-                    if self.file_stats_map.lock().unwrap().contains_key(&path.as_ref().to_path_buf()) {
+                    // If the entry for the old file exists
+                    if self.file_map.find(&path.as_ref().to_path_buf()).is_some() {
                         is_ok_to_refresh = true;
                     }
                 }
@@ -229,7 +227,7 @@ impl Cache {
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
     pub fn remove<P: AsRef<Path>>(&self, path: P) {
-        self.file_stats_map.lock().unwrap().remove(&path.as_ref().to_path_buf());
+//        self.file_stats_map.lock().unwrap().remove(&path.as_ref().to_path_buf());
         self.file_map.remove(&path.as_ref().to_path_buf());
         self.access_count_map.remove(&path.as_ref().to_path_buf());
     }
@@ -340,7 +338,7 @@ impl Cache {
     /// assert!(cache.used_bytes() == 0);
     /// ```
     pub fn used_bytes(&self) -> usize {
-        self.file_map.iter().fold(0usize, |size, x| size + x.1.size) // Todo, consider getting this from the stats instead, so a lock doesn't need to be taken.
+        self.file_map.iter().fold(0usize, |size, x| size + x.1.stats.size) // Todo, consider getting this from the stats instead, so a lock doesn't need to be taken.
     }
 
     /// Gets the size of the file from the file's metadata.
@@ -469,7 +467,7 @@ impl Cache {
                                 // The file was accessed with this key earlier when sorting priorities.
                                 // Unwrapping be safe.
                                 let _ = self.file_map.remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
-                                let _ = self.file_stats_map.lock().unwrap().remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
+//                                let _ = self.file_stats_map.lock().unwrap().remove(&file_key).expect("Because the file was just accessed, it should be safe to remove it from the map.");
                             }
 
 
@@ -570,10 +568,6 @@ impl Cache {
 
     /// Update the stats associated with this file.
     fn update_stats<P: AsRef<Path>>(&self, path: P) {
-        let size: usize = match self.file_map.find(&path.as_ref().to_path_buf()){
-            Some(in_memory_file) => in_memory_file.get().size,
-            None => Cache::get_file_size_from_metadata(&path.as_ref().to_path_buf()).unwrap_or(0)
-        };
 
         let default_atomic_access_count = AtomicUsize::new(1);
         let access_count: &AtomicUsize = match self.access_count_map.find(&path.as_ref().to_path_buf()) {
@@ -581,17 +575,28 @@ impl Cache {
             None => &default_atomic_access_count
         };
 
-        let mut locked_stats_map = self.file_stats_map.lock().unwrap();
-        let stats: &mut FileStats = locked_stats_map.entry(path.as_ref().to_path_buf()).or_insert(
-            FileStats {
-                size,
-                access_count: access_count.load(Ordering::Relaxed),
-                priority: 0
+        self.file_map.upsert(
+            path.as_ref().to_path_buf(), // Key
+            InMemoryFile { // Default Value
+                bytes: Vec::new(),
+                stats: FileStats{
+                    size: 0,
+                    access_count: 0,
+                    priority: 0
+                },
+            },
+            &|file_entry| { // Update Function
+
+                // If the size is initialized to 0, then try to get the actual size from the filesystem
+                if file_entry.stats.size == 0 {
+                    file_entry.stats.size = Cache::get_file_size_from_metadata(&path.as_ref().to_path_buf()).unwrap_or(0);
+                }
+                file_entry.stats.access_count = access_count.load(Ordering::Relaxed);
+                file_entry.stats.priority = (self.priority_function)(file_entry.stats.access_count, file_entry.stats.size); // update the priority score.
             }
         );
-        stats.size = size;
-        stats.access_count = access_count.load(Ordering::Relaxed);
-        stats.priority = (self.priority_function)(stats.access_count, stats.size); // update the priority score.
+
+
     }
 
 
@@ -608,9 +613,9 @@ impl Cache {
     ///
     fn sorted_priorities(&self) -> Vec<(PathBuf, FileStats)> {
 
-        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_stats_map.lock().unwrap()
+        let mut priorities: Vec<(PathBuf, FileStats)> = self.file_map
             .iter()
-            .map( |x| (x.0.clone(), x.1.clone()))
+            .map( |x| (x.0.clone(), x.1.stats.clone()))
             .collect();
 
         // Sort the priorities from highest priority to lowest, so when they are pop()ed later,
@@ -925,8 +930,12 @@ mod tests {
         let named_file_1m_2 = NamedFile::open(path_1m.clone()).unwrap();
 
 
-        let imf_5m = InMemoryFile::open(path_5m.clone()).unwrap();
-        let imf_1m = InMemoryFile::open(path_1m.clone()).unwrap();
+        let mut imf_5m = InMemoryFile::open(path_5m.clone()).unwrap();
+        let mut imf_1m = InMemoryFile::open(path_1m.clone()).unwrap();
+
+        // set expected stats for 5m
+        imf_5m.stats.access_count = 1;
+        imf_5m.stats.priority = 2289;
 
 
         let cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
@@ -948,6 +957,11 @@ mod tests {
             Ok(CachedFile::from(named_file_1m_2))
         );
         println!("3:\n{:#?}", cache);
+
+        // set the expected stats for 1m
+        imf_1m.stats.access_count = 3;
+        imf_1m.stats.priority = 3072;
+
         assert_eq!(
             cache.try_insert( path_1m.clone()).unwrap().get_in_memory_file().file.as_ref().get(),
             &imf_1m
@@ -1022,9 +1036,11 @@ mod tests {
         let path_10m: PathBuf = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         let named_file: NamedFile = NamedFile::open(path_5m.clone()).unwrap();
-        let imf     : InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
-//        let cached_file: NamedInMemoryFile = NamedInMemoryFile::new(path_5m.clone(), );
+        let mut imf     : InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
 
+        // Set the expected values for the stats in IMF.
+        imf.stats.priority = 2289;
+        imf.stats.access_count = 1;
 
         // expect the cache to get the item from the FS.
         assert_eq!(
@@ -1052,7 +1068,7 @@ mod tests {
 
         assert_eq!(
             match cache.get(&path_5m).unwrap() {
-                CachedFile::Cached(c) => c.file.get().size,
+                CachedFile::Cached(c) => c.file.get().stats.size,
                 CachedFile::FileSystem(_) => unreachable!()
             },
             MEG5
@@ -1065,7 +1081,7 @@ mod tests {
 
         assert_eq!(
             match cache.get(&path_of_file_with_10mb_but_path_name_5m).unwrap() {
-                CachedFile::Cached(c) => c.file.get().size,
+                CachedFile::Cached(c) => c.file.get().stats.size,
                 CachedFile::FileSystem(_) => unreachable!()
             },
             MEG10
