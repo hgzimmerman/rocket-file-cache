@@ -1,7 +1,7 @@
 [![Current Crates.io Version](https://img.shields.io/crates/v/rocket-file-cache.svg)](https://crates.io/crates/rocket-file-pool)
 
 # Rocket File Cache
-An in-memory file cache for the Rocket web framework.
+A concurrent, in-memory file cache for the Rocket web framework.
 
 Rocket File Cache can be used as a drop in replacement for Rocket's NamedFile when serving files.
 
@@ -19,13 +19,13 @@ fn main() {
 Can be sped up by getting files via a cache instead:
 ```rust
 #[get("/<file..>")]
-fn files(file: PathBuf, cache: State<Mutex<Cache>>) -> Option<ResponderFile> {
-    let pathbuf: PathBuf = Path::new("static/").join(file).to_owned();
-    cache.lock().unwrap().get(&pathbuf)
+fn files(file: PathBuf, cache: State<Cache> ) -> Option<CachedFile> {
+    CachedFile::open(Path::new("static/").join(file), cache.inner())
 }
 
+
 fn main() {
-    let cache: Mutex<Cache> = Mutex::new(Cache::new(1024 * 1024 * 40)); // 40 MB
+    let cache: Cache = Cache::new(1024 * 1024 * 40); // 40 MB
     rocket::ignite()
         .manage(cache)
         .mount("/", routes![files])
@@ -38,7 +38,7 @@ fn main() {
 Rocket File Cache keeps a set of frequently accessed files in memory so your webserver won't have to wait for your disk to read the files.
 This should improve latency and throughput on systems that are bottlenecked on disk I/O.
 
-In environments where the files in question can all fit comfortably into the cache, and the files themselves are small, significant speedups for serving the files have been observed.
+In environments where the files being served can all fit comfortably into the cache, and the files themselves are small, significant speedups for serving the files have been observed.
 
 If you are serving a known size of static files (index.html, js bundle, a couple of assets),
 you should try to set the maximum size of the cache to let them all fit,
@@ -79,16 +79,12 @@ test cache::tests::named_file_read_5mb                  ... bench:   1,605,741 n
 
 It can be seen that on a server with slow disk reads, small file access times are vastly improved versus the disk.
 Larger files also seem to benefit, although to a lesser degree.
-A maximum file size can be set to prevent files above a specific size from being added.
-
-Because the cache needs to be guarded by a Mutex, only one thread can get access at a time.
-This will have a negative performance impact in cases where the webserver is handling enough traffic to constantly cause lock contention.
-
-This performance hit can be mitigated by using a pool of caches at the expense of increased memory use,
-or by immediately falling back to getting files from the filesystem if a lock can't be gained.
+Minimum and maximum file sizes can be set to keep files in the cache within size bounds.
 
 For queries that will retrieve an entry from the cache, there is no time penalty for each additional file in the cache.
 The more items in the cache, the larger the time penalty for a cache miss.
+
+
 
 ### Requirements
 * Nightly Rust (2017-10-22)
@@ -103,5 +99,5 @@ If you have any feature requests or notice any bugs, please open an Issue.
 * Write your own.
 Most of the work here focuses on when to replace items in the cache.
 If you know that you will never grow or shrink your cache of files, all you need is a 
-`HashMap<PathBuf, Vec<u8>>`, an `impl Responder<'static> for Vec<u8> {...}`, and some glue logic
+`Mutex<HashMap<PathBuf, Vec<u8>>>`, an `impl Responder<'static> for Vec<u8> {...}`, and some glue logic
 to hold your files in memory and serve them as responses.
