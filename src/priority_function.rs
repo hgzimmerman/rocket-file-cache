@@ -15,11 +15,11 @@ pub type PriorityFunction = fn(usize, usize) -> usize;
 /// This function takes the square root of the size of the file times the number of times it has been accessed.
 /// This should give some priority to bigger files, while still allowing some smaller files to enter the cache.
 pub fn default_priority_function(access_count: usize, size: usize) -> usize {
- ((size as f64).sqrt() as usize) * access_count
+    ((size as f64).sqrt() as usize) * access_count
 }
 
 /// Priority is calculated as the size times the access count.
-pub fn normal_priority_function(access_count: usize, size: usize ) -> usize {
+pub fn normal_priority_function(access_count: usize, size: usize) -> usize {
     size * access_count
 }
 
@@ -35,7 +35,7 @@ pub fn access_priority_function(access_count: usize, _: usize) -> usize {
 /// Does not take into account the number of accesses the file has.
 pub fn small_files_priority_function(_: usize, size: usize) -> usize {
     if size == 0 {
-        return 0 // don't give any priority to completely empty files.
+        return 0; // don't give any priority to completely empty files.
     }
     usize::MAX / size
 }
@@ -46,7 +46,7 @@ pub fn small_files_priority_function(_: usize, size: usize) -> usize {
 /// Does take into account the number of accesses the file has.
 pub fn small_files_access_priority_function(access_count: usize, size: usize) -> usize {
     if size == 0 {
-        return 0 // don't give any priority to completely empty files.
+        return 0; // don't give any priority to completely empty files.
     }
     (usize::MAX / size) * access_count
 }

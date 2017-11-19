@@ -14,7 +14,7 @@ use in_memory_file::InMemoryFile;
 #[derive(Debug, PartialEq)]
 pub enum CacheBuildError {
     SizeLimitNotSet,
-    MinFileSizeIsLargerThanMaxFileSize
+    MinFileSizeIsLargerThanMaxFileSize,
 }
 
 /// A builder for Caches.
@@ -23,7 +23,7 @@ pub struct CacheBuilder {
     size_limit: Option<usize>,
     priority_function: Option<PriorityFunction>,
     min_file_size: Option<usize>,
-    max_file_size: Option<usize>
+    max_file_size: Option<usize>,
 }
 
 
@@ -35,7 +35,7 @@ impl CacheBuilder {
             size_limit: None,
             priority_function: None,
             min_file_size: None,
-            max_file_size: None
+            max_file_size: None,
         }
     }
 
@@ -104,42 +104,40 @@ impl CacheBuilder {
     pub fn build(&self) -> Result<Cache, CacheBuildError> {
         let size_limit = match self.size_limit {
             Some(s) => s,
-            None => return Err(CacheBuildError::SizeLimitNotSet)
+            None => return Err(CacheBuildError::SizeLimitNotSet),
         };
 
         let priority_function: PriorityFunction = match self.priority_function {
             Some(p) => p,
-            None => default_priority_function
+            None => default_priority_function,
         };
 
         if let Some(min_file_size) = self.min_file_size {
             if let Some(max_file_size) = self.max_file_size {
                 if min_file_size > max_file_size {
-                    return Err(CacheBuildError::MinFileSizeIsLargerThanMaxFileSize)
+                    return Err(CacheBuildError::MinFileSizeIsLargerThanMaxFileSize);
                 }
             }
         }
 
         let min_file_size: usize = match self.min_file_size {
             Some(min) => min,
-            None => 0
+            None => 0,
         };
 
         let max_file_size: usize = match self.max_file_size {
             Some(max) => max,
-            None => usize::MAX
+            None => usize::MAX,
         };
 
-        Ok(
-            Cache {
-                size_limit,
-                min_file_size,
-                max_file_size,
-                priority_function,
-                file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
-                access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
-            }
-        )
+        Ok(Cache {
+            size_limit,
+            min_file_size,
+            max_file_size,
+            priority_function,
+            file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
+            access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
+        })
 
     }
 }
@@ -149,8 +147,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_size_error(){
-        assert_eq!(CacheBuildError::SizeLimitNotSet, CacheBuilder::new().build().unwrap_err());
+    fn no_size_error() {
+        assert_eq!(
+            CacheBuildError::SizeLimitNotSet,
+            CacheBuilder::new().build().unwrap_err()
+        );
     }
     #[test]
     fn min_greater_than_max() {
@@ -168,12 +169,11 @@ mod tests {
     fn can_build() {
         let _: Cache = CacheBuilder::new()
             .size_limit_bytes(1024 * 1024 * 20)
-            .priority_function(|access_count: usize, size: usize| {
-                access_count * size
-            })
+            .priority_function(|access_count: usize, size: usize| access_count * size)
             .max_file_size(1024 * 1024 * 10)
             .min_file_size(1024 * 10)
-            .build().unwrap();
+            .build()
+            .unwrap();
     }
 
 }

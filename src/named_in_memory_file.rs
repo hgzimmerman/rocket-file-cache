@@ -4,7 +4,7 @@ use rocket::request::Request;
 
 use std::result;
 use std::sync::Arc;
-use std::path::{PathBuf,Path};
+use std::path::{PathBuf, Path};
 
 use in_memory_file::InMemoryFile;
 
@@ -20,7 +20,7 @@ use std::fmt;
 //#[derive(Debug)]
 pub struct NamedInMemoryFile<'a> {
     pub(crate) path: PathBuf,
-    pub(crate) file: Arc<Accessor<'a, PathBuf, InMemoryFile>>,
+    pub(crate) file: Arc<Accessor<'a, PathBuf, InMemoryFile>>, // TODO, do I need this ARC?
 }
 
 
@@ -31,15 +31,14 @@ impl<'a> Debug for NamedInMemoryFile<'a> {
 }
 
 
-impl <'a> NamedInMemoryFile<'a> {
+impl<'a> NamedInMemoryFile<'a> {
     /// Reads the file at the path into a CachedFile.
     pub(crate) fn new<P: AsRef<Path>>(path: P, m: Accessor<'a, PathBuf, InMemoryFile>) -> NamedInMemoryFile<'a> {
         NamedInMemoryFile {
             path: path.as_ref().to_path_buf(),
-            file: Arc::new(m)
+            file: Arc::new(m),
         }
     }
-    // TODO, create a macro that reads an in-memory-file, creates a mutex, and locks the file in the mutex, and creates the cached file.
 }
 
 
@@ -50,8 +49,7 @@ impl <'a> NamedInMemoryFile<'a> {
 /// extension, convert the `CachedFile` to a `File`, and respond with that instead.
 ///
 /// Based on NamedFile from rocket::response::NamedFile
-impl <'a>Responder<'a> for NamedInMemoryFile<'a> {
-
+impl<'a> Responder<'a> for NamedInMemoryFile<'a> {
     fn respond_to(self, _: &Request) -> result::Result<Response<'a>, Status> {
         let mut response = Response::new();
         if let Some(ext) = self.path.extension() {
@@ -61,7 +59,7 @@ impl <'a>Responder<'a> for NamedInMemoryFile<'a> {
         }
 
         unsafe {
-            let cloned_wrapper: *const Accessor<'a, PathBuf, InMemoryFile> =  Arc::into_raw(self.file);
+            let cloned_wrapper: *const Accessor<'a, PathBuf, InMemoryFile> = Arc::into_raw(self.file);
             response.set_streamed_body((*cloned_wrapper).get().bytes.as_slice());
             let _ = Arc::from_raw(cloned_wrapper); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
         }
@@ -69,5 +67,3 @@ impl <'a>Responder<'a> for NamedInMemoryFile<'a> {
         Ok(response)
     }
 }
-
-
