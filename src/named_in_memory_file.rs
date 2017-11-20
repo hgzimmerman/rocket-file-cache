@@ -17,7 +17,6 @@ use std::fmt;
 /// A wrapper around an in-memory file.
 /// This struct is created when when a request to the cache is made.
 /// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
-//#[derive(Debug)]
 pub struct NamedInMemoryFile<'a> {
     pub(crate) path: PathBuf,
     pub(crate) file: Arc<Accessor<'a, PathBuf, InMemoryFile>>, // TODO, do I need this ARC?

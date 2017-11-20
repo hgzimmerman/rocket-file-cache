@@ -57,7 +57,6 @@ pub struct FileStats {
 /// This will repeat until either enough space can be freed for the new file, and the new file is
 /// inserted, or until the priority of the cached files is greater than that of the new file,
 /// in which case, the new file isn't inserted.
-//#[derive(Debug)]
 pub struct Cache {
     /// The number of bytes the file_map should be able hold at once.
     pub size_limit: usize,
@@ -342,7 +341,7 @@ impl Cache {
         self.file_map.iter().fold(
             0usize,
             |size, x| size + x.1.stats.size,
-        ) // Todo, consider getting this from the stats instead, so a lock doesn't need to be taken.
+        )
     }
 
     /// Gets the size of the file from the file's metadata.
@@ -404,33 +403,9 @@ impl Cache {
 
 
         if size > self.max_file_size || size < self.min_file_size {
-
-            debug!("File does not fit size constraints of the cache.");
-            match NamedFile::open(path.clone()) {
-                Ok(named_file) => {
-                    self.increment_access_count(&path);
-                    return Ok(CachedFile::from(named_file));
-                }
-                Err(_) => return Err(CacheInvalidationError::InvalidPath),
-            }
-
+            self.get_file_from_fs(&path)
         } else if required_space_for_new_file < 0 && size < self.size_limit {
-
-            debug!("Cache has room for the file.");
-            match InMemoryFile::open(path.as_path()) {
-                Ok(file) => {
-                    self.file_map.insert(path.clone(), file);
-
-                    self.increment_access_count(&path);
-                    self.update_stats(&path);
-
-                    let cached_file = NamedInMemoryFile::new(path.clone(), self.file_map.find(&path).unwrap());
-
-                    return Ok(CachedFile::from(cached_file));
-                }
-                Err(_) => return Err(CacheInvalidationError::InvalidPath),
-            }
-
+            self.get_file_from_fs_and_add_to_cache(&path)
         } else {
             debug!("Trying to make room for the file");
 
@@ -488,6 +463,36 @@ impl Cache {
                     }
                 }
             }
+        }
+    }
+
+
+
+    fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheInvalidationError> {
+        debug!("File does not fit size constraints of the cache.");
+        match NamedFile::open(path.as_ref().to_path_buf()) {
+            Ok(named_file) => {
+                self.increment_access_count(path);
+                return Ok(CachedFile::from(named_file));
+            }
+            Err(_) => return Err(CacheInvalidationError::InvalidPath),
+        }
+    }
+
+    fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheInvalidationError> {
+        debug!("Cache has room for the file.");
+        match InMemoryFile::open(&path) {
+            Ok(file) => {
+                self.file_map.insert(path.as_ref().to_path_buf(), file);
+
+                self.increment_access_count(&path);
+                self.update_stats(&path);
+
+                let cached_file = NamedInMemoryFile::new(path.as_ref().to_path_buf(), self.file_map.find(path.as_ref()).unwrap());
+
+                return Ok(CachedFile::from(cached_file));
+            }
+            Err(_) => return Err(CacheInvalidationError::InvalidPath),
         }
     }
 
