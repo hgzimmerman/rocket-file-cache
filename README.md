@@ -1,4 +1,4 @@
-[![Current Crates.io Version](https://img.shields.io/crates/v/rocket-file-cache.svg)](https://crates.io/crates/rocket-file-pool)
+[![Current Crates.io Version](https://img.shields.io/crates/v/rocket-file-cache.svg)](https://crates.io/crates/rocket-file-cache)
 
 # Rocket File Cache
 A concurrent, in-memory file cache for the Rocket web framework.
