@@ -4,7 +4,7 @@ use rocket::request::Request;
 use cache::Cache;
 use std::path::Path;
 
-use super::NamedInMemoryFile;
+use named_in_memory_file::NamedInMemoryFile;
 
 
 /// Wrapper around types that represent files and implement Responder<'static>.
