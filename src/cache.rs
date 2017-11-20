@@ -467,7 +467,6 @@ impl Cache {
     }
 
 
-
     fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheInvalidationError> {
         debug!("File does not fit size constraints of the cache.");
         match NamedFile::open(path.as_ref().to_path_buf()) {

@@ -3,11 +3,12 @@ use cache::Cache;
 use priority_function::{PriorityFunction, default_priority_function};
 use std::usize;
 
-use concurrent_hashmap::ConcHashMap;
+use concurrent_hashmap::{ConcHashMap, Options};
 use std::collections::hash_map::RandomState;
 use std::sync::atomic::AtomicUsize;
 use std::path::PathBuf;
 use in_memory_file::InMemoryFile;
+
 
 
 /// Error types that can be encountered when a cache is built.
@@ -20,7 +21,8 @@ pub enum CacheBuildError {
 #[derive(Debug)]
 pub struct CacheBuilder {
     size_limit: usize,
-    concurrency: Option<usize>,
+    concurrency: Option<u16>,
+    capacity: Option<usize>,
     priority_function: Option<PriorityFunction>,
     min_file_size: Option<usize>,
     max_file_size: Option<usize>,
@@ -34,6 +36,7 @@ impl CacheBuilder {
         CacheBuilder {
             size_limit,
             concurrency: None,
+            capacity: None,
             priority_function: None,
             min_file_size: None,
             max_file_size: None,
@@ -41,9 +44,19 @@ impl CacheBuilder {
     }
 
     // TODO, allow setting of concurrency setting
-    // Default is 16
-    fn concurrency<'a>(&'a mut self, concurrency: usize) -> &mut Self {
+
+    /// Sets the concurrency setting of the concurrent hashmap backing the cache.
+    /// The dfault is 16
+    pub fn concurrency<'a>(&'a mut self, concurrency: u16) -> &mut Self {
         self.concurrency= Some(concurrency);
+        self
+    }
+
+    /// Sets the number of elements that should be preallocated for the concurrent hashmap backing the cache.
+    ///
+    /// The default is 0.
+    pub fn capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
+        self.capacity= Some(capacity);
         self
     }
 
@@ -125,13 +138,29 @@ impl CacheBuilder {
             None => usize::MAX,
         };
 
+
+
+        let mut options_files_map: Options<RandomState> = Options::default();
+        let mut options_access_map: Options<RandomState> = Options::default();
+
+        if let Some(conc) = self.concurrency {
+            options_files_map.concurrency = conc;
+            options_access_map.concurrency = conc;
+        }
+
+        if let Some(capacity) = self.capacity {
+            options_files_map.capacity = capacity;
+            options_access_map.capacity = capacity;
+        }
+
+
         Ok(Cache {
             size_limit: self.size_limit,
             min_file_size,
             max_file_size,
             priority_function,
-            file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
-            access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
+            file_map: ConcHashMap::with_options(options_files_map),
+            access_count_map: ConcHashMap::with_options(options_access_map)
         })
 
     }
