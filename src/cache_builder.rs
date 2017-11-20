@@ -43,20 +43,20 @@ impl CacheBuilder {
         }
     }
 
-    // TODO, allow setting of concurrency setting
-
     /// Sets the concurrency setting of the concurrent hashmap backing the cache.
-    /// The dfault is 16
+    /// The default is 16
     pub fn concurrency<'a>(&'a mut self, concurrency: u16) -> &mut Self {
-        self.concurrency= Some(concurrency);
+        self.concurrency = Some(concurrency);
         self
     }
 
+    // TODO, make this public possibly? Or delete? I don't think that this information is relevant to the use of the cache.
     /// Sets the number of elements that should be preallocated for the concurrent hashmap backing the cache.
     ///
+    /// The concurrent hashmap will grow to store more than the preallocated amount.
     /// The default is 0.
-    pub fn capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
-        self.capacity= Some(capacity);
+    fn capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
+        self.capacity = Some(capacity);
         self
     }
 
@@ -182,11 +182,13 @@ mod tests {
     }
 
     #[test]
-    fn can_build() {
+    fn all_options_used_in_build() {
         let _: Cache = CacheBuilder::new(1024 * 1024 * 20)
             .priority_function(|access_count: usize, size: usize| access_count * size)
             .max_file_size(1024 * 1024 * 10)
             .min_file_size(1024 * 10)
+            .capacity(200)
+            .concurrency(20)
             .build()
             .unwrap();
     }
