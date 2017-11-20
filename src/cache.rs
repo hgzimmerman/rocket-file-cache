@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use named_in_memory_file::NamedInMemoryFile;
 use cached_file::CachedFile;
 use in_memory_file::InMemoryFile;
-use priority_function::{PriorityFunction, default_priority_function};
+use priority_function::{default_priority_function};
 use concurrent_hashmap::ConcHashMap;
 use std::collections::hash_map::RandomState;
 use std::fmt::Debug;
@@ -62,7 +62,7 @@ pub struct Cache {
     pub size_limit: usize,
     pub min_file_size: usize, // The minimum size file that can be added to the cache
     pub max_file_size: usize, // The maximum size file that can be added to the cache
-    pub priority_function: PriorityFunction, // The priority function that is used to determine which files should be in the cache.
+    pub priority_function: fn(usize, usize) -> usize, // The priority function that is used to determine which files should be in the cache.
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
     pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }

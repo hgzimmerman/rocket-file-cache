@@ -15,6 +15,5 @@ mod cached_file;
 
 pub use cache::Cache;
 pub use cache_builder::{CacheBuilder, CacheBuildError};
-//pub use named_in_memory_file::*;
 pub use cached_file::CachedFile;
 pub use priority_function::*;

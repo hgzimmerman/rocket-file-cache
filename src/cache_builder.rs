@@ -1,6 +1,6 @@
 use cache::Cache;
 
-use priority_function::{PriorityFunction, default_priority_function};
+use priority_function::default_priority_function;
 use std::usize;
 
 use concurrent_hashmap::{ConcHashMap, Options};
@@ -23,7 +23,7 @@ pub struct CacheBuilder {
     size_limit: usize,
     concurrency: Option<u16>,
     capacity: Option<usize>,
-    priority_function: Option<PriorityFunction>,
+    priority_function: Option<fn(usize, usize) -> usize>,
     min_file_size: Option<usize>,
     max_file_size: Option<usize>,
 }
@@ -55,7 +55,7 @@ impl CacheBuilder {
     ///
     /// The concurrent hashmap will grow to store more than the preallocated amount.
     /// The default is 0.
-    fn capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
+    fn initial_capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
         self.capacity = Some(capacity);
         self
     }
@@ -82,7 +82,7 @@ impl CacheBuilder {
     ///     .build()
     ///     .unwrap();
     /// ```
-    pub fn priority_function<'a>(&'a mut self, priority_function: PriorityFunction) -> &mut Self {
+    pub fn priority_function<'a>(&'a mut self, priority_function: fn(usize, usize) -> usize) -> &mut Self {
         self.priority_function = Some(priority_function);
         self
     }
@@ -115,7 +115,7 @@ impl CacheBuilder {
     /// ```
     pub fn build(&self) -> Result<Cache, CacheBuildError> {
 
-        let priority_function: PriorityFunction = match self.priority_function {
+        let priority_function = match self.priority_function {
             Some(p) => p,
             None => default_priority_function,
         };
@@ -187,7 +187,6 @@ mod tests {
             .priority_function(|access_count: usize, size: usize| access_count * size)
             .max_file_size(1024 * 1024 * 10)
             .min_file_size(1024 * 10)
-            .capacity(200)
             .concurrency(20)
             .build()
             .unwrap();
