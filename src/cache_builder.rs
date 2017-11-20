@@ -13,14 +13,14 @@ use in_memory_file::InMemoryFile;
 /// Error types that can be encountered when a cache is built.
 #[derive(Debug, PartialEq)]
 pub enum CacheBuildError {
-    SizeLimitNotSet,
     MinFileSizeIsLargerThanMaxFileSize,
 }
 
 /// A builder for Caches.
 #[derive(Debug)]
 pub struct CacheBuilder {
-    size_limit: Option<usize>,
+    size_limit: usize,
+    concurrency: Option<usize>,
     priority_function: Option<PriorityFunction>,
     min_file_size: Option<usize>,
     max_file_size: Option<usize>,
@@ -30,19 +30,20 @@ pub struct CacheBuilder {
 
 impl CacheBuilder {
     /// Create a new CacheBuilder.
-    pub fn new() -> CacheBuilder {
+    pub fn new(size_limit: usize) -> CacheBuilder {
         CacheBuilder {
-            size_limit: None,
+            size_limit,
+            concurrency: None,
             priority_function: None,
             min_file_size: None,
             max_file_size: None,
         }
     }
 
-    /// Mandatory parameter.
-    /// Sets the maximum number of bytes the cache can hold.
-    pub fn size_limit_bytes<'a>(&'a mut self, size_limit_bytes: usize) -> &mut Self {
-        self.size_limit = Some(size_limit_bytes);
+    // TODO, allow setting of concurrency setting
+    // Default is 16
+    fn concurrency<'a>(&'a mut self, concurrency: usize) -> &mut Self {
+        self.concurrency= Some(concurrency);
         self
     }
 
@@ -61,8 +62,7 @@ impl CacheBuilder {
     /// ```
     /// use rocket_file_cache::Cache;
     /// use rocket_file_cache::CacheBuilder;
-    /// let cache: Cache = CacheBuilder::new()
-    ///     .size_limit_bytes(1024 * 1024 * 50) // 50 MB cache
+    /// let cache: Cache = CacheBuilder::new(1024 * 1024 * 50) // 50 MB cache
     ///     .priority_function(|access_count, size| {
     ///         access_count * access_count * size
     ///     })
@@ -94,18 +94,13 @@ impl CacheBuilder {
     /// use rocket_file_cache::Cache;
     /// use rocket_file_cache::CacheBuilder;
     ///
-    /// let cache: Cache = CacheBuilder::new()
-    ///     .size_limit_bytes(1024 * 1024 * 50) // 50 MB cache
+    /// let cache: Cache = CacheBuilder::new(1024 * 1024 * 50) // 50 MB cache
     ///     .min_file_size(1024 * 4) // Don't store files smaller than 4 KB
     ///     .max_file_size(1024 * 1024 * 6) // Don't store files larger than 6 MB
     ///     .build()
     ///     .unwrap();
     /// ```
     pub fn build(&self) -> Result<Cache, CacheBuildError> {
-        let size_limit = match self.size_limit {
-            Some(s) => s,
-            None => return Err(CacheBuildError::SizeLimitNotSet),
-        };
 
         let priority_function: PriorityFunction = match self.priority_function {
             Some(p) => p,
@@ -131,7 +126,7 @@ impl CacheBuilder {
         };
 
         Ok(Cache {
-            size_limit,
+            size_limit: self.size_limit,
             min_file_size,
             max_file_size,
             priority_function,
@@ -147,17 +142,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_size_error() {
-        assert_eq!(
-            CacheBuildError::SizeLimitNotSet,
-            CacheBuilder::new().build().unwrap_err()
-        );
-    }
-    #[test]
     fn min_greater_than_max() {
 
-        let e: CacheBuildError = CacheBuilder::new()
-            .size_limit_bytes(1024 * 1024 * 10)
+        let e: CacheBuildError = CacheBuilder::new(1024 * 1024 * 10)
             .min_file_size(1024 * 1024 * 5)
             .max_file_size(1024 * 1024 * 4)
             .build()
@@ -167,8 +154,7 @@ mod tests {
 
     #[test]
     fn can_build() {
-        let _: Cache = CacheBuilder::new()
-            .size_limit_bytes(1024 * 1024 * 20)
+        let _: Cache = CacheBuilder::new(1024 * 1024 * 20)
             .priority_function(|access_count: usize, size: usize| access_count * size)
             .max_file_size(1024 * 1024 * 10)
             .min_file_size(1024 * 10)

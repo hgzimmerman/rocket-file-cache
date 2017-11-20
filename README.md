@@ -93,8 +93,11 @@ The more items in the cache, the larger the time penalty for a cache miss.
 # Notes
 If you have any feature requests or notice any bugs, please open an Issue.
 
-# Alternatives 
+I am rapidly developing this crate.
+I am changing the public interface on a regular basis.
+You should expect breaking changes pretty frequently until this reaches a 1.0.0 release.
 
+# Alternatives 
 * [Nginx](http://nginx.org/)
 * Write your own.
 Most of the work here focuses on when to replace items in the cache.
