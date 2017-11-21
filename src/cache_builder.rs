@@ -5,9 +5,6 @@ use std::usize;
 
 use concurrent_hashmap::{ConcHashMap, Options};
 use std::collections::hash_map::RandomState;
-use std::sync::atomic::AtomicUsize;
-use std::path::PathBuf;
-use in_memory_file::InMemoryFile;
 
 
 
@@ -50,15 +47,15 @@ impl CacheBuilder {
         self
     }
 
-    // TODO, make this public possibly? Or delete? I don't think that this information is relevant to the use of the cache.
-    /// Sets the number of elements that should be preallocated for the concurrent hashmap backing the cache.
-    ///
-    /// The concurrent hashmap will grow to store more than the preallocated amount.
-    /// The default is 0.
-    fn initial_capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
-        self.capacity = Some(capacity);
-        self
-    }
+//    // TODO, make this public possibly? Or delete? I don't think that this information is relevant to the use of the cache.
+//    /// Sets the number of elements that should be preallocated for the concurrent hashmap backing the cache.
+//    ///
+//    /// The concurrent hashmap will grow to store more than the preallocated amount.
+//    /// The default is 0.
+//    fn initial_capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
+//        self.capacity = Some(capacity);
+//        self
+//    }
 
     /// Override the default priority function used for determining if the cache should hold a file.
     /// By default a score is calculated using the square root of the size of a file, times the number
