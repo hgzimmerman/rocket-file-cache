@@ -5,9 +5,6 @@ use std::usize;
 
 use concurrent_hashmap::{ConcHashMap, Options};
 use std::collections::hash_map::RandomState;
-use std::sync::atomic::AtomicUsize;
-use std::path::PathBuf;
-use in_memory_file::InMemoryFile;
 
 
 
@@ -51,10 +48,11 @@ impl CacheBuilder {
     }
 
     // TODO, make this public possibly? Or delete? I don't think that this information is relevant to the use of the cache.
-    /// Sets the number of elements that should be preallocated for the concurrent hashmap backing the cache.
+    /// Sets the number of elements that should be pre-allocated for the concurrent HashMap backing the cache.
     ///
-    /// The concurrent hashmap will grow to store more than the preallocated amount.
+    /// The concurrent HashMap will grow to store more than the pre-allocated amount.
     /// The default is 0.
+    #[allow(dead_code)]
     fn initial_capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
         self.capacity = Some(capacity);
         self
