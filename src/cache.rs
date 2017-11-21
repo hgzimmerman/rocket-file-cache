@@ -207,7 +207,7 @@ impl Cache {
     // TODO, add checks and return an enum indicating what happened.
     /// Removes the file from the cache.
     /// This will not reset the access count, so the next time the file is accessed, it will be added to the cache again.
-    /// The access count will have to be reset separately.
+    /// The access count will have to be reset separately using `alter_access_count()`.
     ///
     /// # Arguments
     ///
@@ -224,9 +224,12 @@ impl Cache {
     /// cache.remove(&pathbuf);
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
-    pub fn remove<P: AsRef<Path>>(&self, path: P) {
-        self.file_map.remove(&path.as_ref().to_path_buf());
-        self.access_count_map.remove(&path.as_ref().to_path_buf());
+    pub fn remove<P: AsRef<Path>>(&self, path: P) -> bool {
+        if let Some(_) = self.file_map.remove(&path.as_ref().to_path_buf()){
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns a boolean indicating if the cache has an entry corresponding to the given key.
