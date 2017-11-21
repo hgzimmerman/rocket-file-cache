@@ -61,8 +61,7 @@ impl<'a, 'b> PartialEq for CachedFile<'a> {
                 match *other {
                     CachedFile::Cached(_) => false,
                     CachedFile::FileSystem(ref rhs_named_file) => {
-                        // Since all we have is a file handle this will settle for just comparing the paths for now.
-                        // TODO consider reading metadata in to see if they are the same.
+                        // This just compares the file paths
                         *lhs_named_file.path() == *rhs_named_file.path()
                     }
                 }
