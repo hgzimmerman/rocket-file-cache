@@ -52,7 +52,15 @@ impl InMemoryFile {
 /// This information will be used to determine if the file should be replaced in the cache.
 #[derive(Debug, PartialEq, Clone)]
 pub struct FileStats {
+    /// The number of bytes the file contains.
     pub size: usize,
+    /// The number of times the file has been requested.
+    /// This value can be altered the `alter_access_count()` method on the `Cache`,
+    /// and therefore will not represent the true number of access attempts the file has if that
+    /// function is called.
     pub access_count: usize,
+    /// The priority score.
+    /// This is updated every time the access count is incremented by running the cache's `priority_function`
+    /// on the `size` and `access_count`.
     pub priority: usize,
 }

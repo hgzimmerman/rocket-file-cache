@@ -39,7 +39,7 @@ impl CacheBuilder {
     }
 
     /// Sets the concurrency setting of the concurrent hashmap backing the cache.
-    /// The default is 16
+    /// The default is 16.
     pub fn concurrency<'a>(&'a mut self, concurrency: u16) -> &mut Self {
         self.concurrency = Some(concurrency);
         self

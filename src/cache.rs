@@ -48,9 +48,12 @@ enum CacheError {
 pub struct Cache {
     /// The number of bytes the file_map should be able hold at once.
     pub size_limit: usize,
-    pub min_file_size: usize, // The minimum size file that can be added to the cache
-    pub max_file_size: usize, // The maximum size file that can be added to the cache
-    pub priority_function: fn(usize, usize) -> usize, // The priority function that is used to determine which files should be in the cache.
+    /// The minimum number of bytes required for files that will be accepted into the Cache.
+    pub min_file_size: usize,
+    /// The maximum number of bytes required for files that will be accepted into the Cache.
+    pub max_file_size: usize,
+    /// The function that is used to calculate the priority score that is used to determine which files should be in the cache.
+    pub priority_function: fn(usize, usize) -> usize,
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
     pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
