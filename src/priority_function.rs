@@ -24,10 +24,7 @@ pub fn access_priority_function(access_count: usize, _: usize) -> usize {
 /// The smaller the file, the higher priority it will have.
 /// Does not take into account the number of accesses the file has.
 pub fn small_files_priority_function(_: usize, size: usize) -> usize {
-    if size == 0 {
-        return 0; // don't give any priority to completely empty files.
-    }
-    usize::MAX / size
+    usize::checked_div(usize::MAX, size).unwrap_or(0) // don't give any priority to completely empty files.
 }
 
 /// Favor small files with respect to the number of times file was accessed.
@@ -35,8 +32,8 @@ pub fn small_files_priority_function(_: usize, size: usize) -> usize {
 /// The smaller the file, the higher priority it will have.
 /// Does take into account the number of accesses the file has.
 pub fn small_files_access_priority_function(access_count: usize, size: usize) -> usize {
-    if size == 0 {
-        return 0; // don't give any priority to completely empty files.
+    match usize::checked_mul(usize::checked_div(usize::MAX, size).unwrap_or(0), access_count) {
+        Some(v) => v,
+        None => usize::MAX // If the multiplication overflows, then the file will have the maximum priority.
     }
-    (usize::MAX / size) * access_count
 }
