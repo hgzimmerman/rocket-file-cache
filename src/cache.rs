@@ -372,10 +372,10 @@ impl Cache {
     ///
     /// It will get the size of the file to be inserted.
     /// If will use this size to check if the file could be inserted.
-    /// If it can be inserted, it reads the file into memory, stores a copy of the in-memory file behind a pointer, and constructs
-    /// a RespondableFile to return.
+    /// If it can be inserted, it reads the file into memory, stores a copy of the in-memory
+    /// file behind a pointer, and constructs a CachedFile to return.
     ///
-    /// If the file can't be added, it will open a NamedFile and construct a RespondableFile from that,
+    /// If the file can't be added, it will open a NamedFile and construct a CachedFile from that,
     /// and return it.
     /// This means that it doesn't need to read the whole file into memory before reading through it
     /// again to set the response body.
@@ -466,7 +466,9 @@ impl Cache {
         }
     }
 
-
+    /// Gets a file from the filesystem and converts it to a CachedFile.
+    ///
+    /// This should be used when the cache knows that the new file won't make it into the cache.
     fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheInvalidationError> {
         debug!("File does not fit size constraints of the cache.");
         match NamedFile::open(path.as_ref().to_path_buf()) {
@@ -478,6 +480,10 @@ impl Cache {
         }
     }
 
+    /// Reads a file from the filesystem into memory and stores it in the cache.
+    ///
+    /// This is the slowest operation the cache can perform, slower than just getting the file.
+    /// It should only be used when the cache decides to store the file.
     fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheInvalidationError> {
         debug!("Cache has room for the file.");
         match InMemoryFile::open(&path) {
