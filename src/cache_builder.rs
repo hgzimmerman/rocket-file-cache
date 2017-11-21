@@ -158,7 +158,7 @@ impl CacheBuilder {
             max_file_size,
             priority_function,
             file_map: ConcHashMap::with_options(options_files_map),
-            access_count_map: ConcHashMap::with_options(options_access_map)
+            access_count_map: ConcHashMap::with_options(options_access_map),
         })
 
     }

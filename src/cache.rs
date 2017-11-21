@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use named_in_memory_file::NamedInMemoryFile;
 use cached_file::CachedFile;
 use in_memory_file::InMemoryFile;
-use priority_function::{default_priority_function};
+use priority_function::default_priority_function;
 use concurrent_hashmap::ConcHashMap;
 use std::collections::hash_map::RandomState;
 use std::fmt::Debug;
@@ -219,7 +219,7 @@ impl Cache {
     /// assert!(cache.contains_key(&pathbuf) == false);
     /// ```
     pub fn remove<P: AsRef<Path>>(&self, path: P) -> bool {
-        if let Some(_) = self.file_map.remove(&path.as_ref().to_path_buf()){
+        if let Some(_) = self.file_map.remove(&path.as_ref().to_path_buf()) {
             true
         } else {
             false
@@ -466,7 +466,7 @@ impl Cache {
     /// Gets a file from the filesystem and converts it to a CachedFile.
     ///
     /// This should be used when the cache knows that the new file won't make it into the cache.
-    fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheError> {
+    fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) -> Result<CachedFile, CacheError> {
         debug!("File does not fit size constraints of the cache.");
         match NamedFile::open(path.as_ref().to_path_buf()) {
             Ok(named_file) => {
@@ -481,7 +481,7 @@ impl Cache {
     ///
     /// This is the slowest operation the cache can perform, slower than just getting the file.
     /// It should only be used when the cache decides to store the file.
-    fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheError> {
+    fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) -> Result<CachedFile, CacheError> {
         debug!("Cache has room for the file.");
         match InMemoryFile::open(&path) {
             Ok(file) => {
@@ -490,7 +490,10 @@ impl Cache {
                 self.increment_access_count(&path);
                 self.update_stats(&path);
 
-                let cached_file = NamedInMemoryFile::new(path.as_ref().to_path_buf(), self.file_map.find(path.as_ref()).unwrap());
+                let cached_file = NamedInMemoryFile::new(
+                    path.as_ref().to_path_buf(),
+                    self.file_map.find(path.as_ref()).unwrap(),
+                );
 
                 return Ok(CachedFile::from(cached_file));
             }
@@ -566,9 +569,9 @@ impl Cache {
             &|access_count| {
                 let new_access_count: usize = match usize::checked_add(access_count.load(Ordering::Relaxed), 1) {
                     Some(v) => v,
-                    None => usize::MAX
+                    None => usize::MAX,
                 };
-                access_count.store( new_access_count, Ordering::Relaxed)
+                access_count.store(new_access_count, Ordering::Relaxed)
             }, // increment by 1 if key found
         );
     }
