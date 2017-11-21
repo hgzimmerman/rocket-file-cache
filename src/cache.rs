@@ -14,6 +14,7 @@ use std::collections::hash_map::RandomState;
 use std::fmt::Debug;
 use std::fmt;
 use std::fmt::Formatter;
+use in_memory_file::FileStats;
 
 #[derive(Debug, PartialEq)]
 enum CacheError {
@@ -21,14 +22,6 @@ enum CacheError {
     NewPriorityIsNotHighEnough,
     InvalidMetadata,
     InvalidPath,
-}
-
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct FileStats {
-    pub size: usize,
-    pub access_count: usize,
-    pub priority: usize,
 }
 
 

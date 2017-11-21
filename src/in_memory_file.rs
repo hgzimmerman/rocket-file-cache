@@ -5,15 +5,14 @@ use std::fs::File;
 use std::io;
 use std::io::Read;
 use std::fmt;
-use cache::FileStats;
 
 
 /// The structure that represents a file in memory.
-/// Keeps a copy of the size of the file so the size can be used in calculating if it should be
-/// removed from the cache.
+/// Keeps an up to date record of its stats so the cache can use this information to remove the file
+/// from the cache.
 #[derive(Clone, PartialEq)]
-pub(crate) struct InMemoryFile {
-    pub bytes: Vec<u8>,
+pub struct InMemoryFile {
+    pub(crate) bytes: Vec<u8>,
     pub stats: FileStats,
 }
 
@@ -46,4 +45,11 @@ impl InMemoryFile {
 
         Ok(InMemoryFile { bytes, stats })
     }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct FileStats {
+    pub size: usize,
+    pub access_count: usize,
+    pub priority: usize,
 }
