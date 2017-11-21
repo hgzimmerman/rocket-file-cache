@@ -47,6 +47,9 @@ impl InMemoryFile {
     }
 }
 
+
+/// Holds information related to the InMemoryFile.
+/// This information will be used to determine if the file should be replaced in the cache.
 #[derive(Debug, PartialEq, Clone)]
 pub struct FileStats {
     pub size: usize,
