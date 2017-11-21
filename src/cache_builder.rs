@@ -19,7 +19,6 @@ pub enum CacheBuildError {
 pub struct CacheBuilder {
     size_limit: usize,
     concurrency: Option<u16>,
-    capacity: Option<usize>,
     priority_function: Option<fn(usize, usize) -> usize>,
     min_file_size: Option<usize>,
     max_file_size: Option<usize>,
@@ -33,7 +32,6 @@ impl CacheBuilder {
         CacheBuilder {
             size_limit,
             concurrency: None,
-            capacity: None,
             priority_function: None,
             min_file_size: None,
             max_file_size: None,
@@ -47,16 +45,6 @@ impl CacheBuilder {
         self
     }
 
-    // TODO, make this public possibly? Or delete? I don't think that this information is relevant to the use of the cache.
-    /// Sets the number of elements that should be pre-allocated for the concurrent HashMap backing the cache.
-    ///
-    /// The concurrent HashMap will grow to store more than the pre-allocated amount.
-    /// The default is 0.
-    #[allow(dead_code)]
-    fn initial_capacity<'a>(&'a mut self, capacity: usize) -> &mut Self {
-        self.capacity = Some(capacity);
-        self
-    }
 
     /// Override the default priority function used for determining if the cache should hold a file.
     /// By default a score is calculated using the square root of the size of a file, times the number
@@ -144,11 +132,6 @@ impl CacheBuilder {
         if let Some(conc) = self.concurrency {
             options_files_map.concurrency = conc;
             options_access_map.concurrency = conc;
-        }
-
-        if let Some(capacity) = self.capacity {
-            options_files_map.capacity = capacity;
-            options_access_map.capacity = capacity;
         }
 
 
