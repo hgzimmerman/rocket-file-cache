@@ -16,24 +16,19 @@ use std::fmt;
 use std::fmt::Formatter;
 
 #[derive(Debug, PartialEq)]
-enum CacheInvalidationError {
+enum CacheError {
     NoMoreFilesToRemove,
     NewPriorityIsNotHighEnough,
     InvalidMetadata,
     InvalidPath,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct AccessCountAndPriority {
-    access_count: usize,
-    priority_score: usize,
-}
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FileStats {
-    pub(crate) size: usize,
-    pub(crate) access_count: usize,
-    pub(crate) priority: usize,
+    pub size: usize,
+    pub access_count: usize,
+    pub priority: usize,
 }
 
 
@@ -204,7 +199,6 @@ impl Cache {
         is_ok_to_refresh
     }
 
-    // TODO, add checks and return an enum indicating what happened.
     /// Removes the file from the cache.
     /// This will not reset the access count, so the next time the file is accessed, it will be added to the cache again.
     /// The access count will have to be reset separately using `alter_access_count()`.
@@ -349,14 +343,14 @@ impl Cache {
 
     /// Gets the size of the file from the file's metadata.
     /// This avoids having to read the file into memory in order to get the file size.
-    fn get_file_size_from_metadata<P: AsRef<Path>>(path: P) -> Result<usize, CacheInvalidationError> {
+    fn get_file_size_from_metadata<P: AsRef<Path>>(path: P) -> Result<usize, CacheError> {
         let path_string: String = match path.as_ref().to_str() {
             Some(s) => String::from(s),
-            None => return Err(CacheInvalidationError::InvalidPath),
+            None => return Err(CacheError::InvalidPath),
         };
         let metadata: Metadata = match fs::metadata(path_string.as_str()) {
             Ok(m) => m,
-            Err(_) => return Err(CacheInvalidationError::InvalidMetadata),
+            Err(_) => return Err(CacheError::InvalidMetadata),
         };
         let size: usize = metadata.len() as usize;
         Ok(size)
@@ -392,7 +386,7 @@ impl Cache {
     /// look up the location of the file in the filesystem if the file is not in the cache.
     ///
     ///
-    fn try_insert<P: AsRef<Path>>(&self, path: P) -> Result<CachedFile, CacheInvalidationError> {
+    fn try_insert<P: AsRef<Path>>(&self, path: P) -> Result<CachedFile, CacheError> {
         let path: PathBuf = path.as_ref().to_path_buf();
         trace!("Trying to insert file {:?}", path);
 
@@ -452,7 +446,7 @@ impl Cache {
 
                             return Ok(CachedFile::from(cached_file));
                         }
-                        Err(_) => return Err(CacheInvalidationError::InvalidPath),
+                        Err(_) => return Err(CacheError::InvalidPath),
                     }
                 }
                 Err(_) => {
@@ -462,7 +456,7 @@ impl Cache {
                     // response, use a NamedFile instead.
                     match NamedFile::open(path.clone()) {
                         Ok(named_file) => Ok(CachedFile::from(named_file)),
-                        Err(_) => Err(CacheInvalidationError::InvalidPath),
+                        Err(_) => Err(CacheError::InvalidPath),
                     }
                 }
             }
@@ -472,14 +466,14 @@ impl Cache {
     /// Gets a file from the filesystem and converts it to a CachedFile.
     ///
     /// This should be used when the cache knows that the new file won't make it into the cache.
-    fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheInvalidationError> {
+    fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheError> {
         debug!("File does not fit size constraints of the cache.");
         match NamedFile::open(path.as_ref().to_path_buf()) {
             Ok(named_file) => {
                 self.increment_access_count(path);
                 return Ok(CachedFile::from(named_file));
             }
-            Err(_) => return Err(CacheInvalidationError::InvalidPath),
+            Err(_) => return Err(CacheError::InvalidPath),
         }
     }
 
@@ -487,7 +481,7 @@ impl Cache {
     ///
     /// This is the slowest operation the cache can perform, slower than just getting the file.
     /// It should only be used when the cache decides to store the file.
-    fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheInvalidationError> {
+    fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) ->Result<CachedFile, CacheError> {
         debug!("Cache has room for the file.");
         match InMemoryFile::open(&path) {
             Ok(file) => {
@@ -500,7 +494,7 @@ impl Cache {
 
                 return Ok(CachedFile::from(cached_file));
             }
-            Err(_) => return Err(CacheInvalidationError::InvalidPath),
+            Err(_) => return Err(CacheError::InvalidPath),
         }
     }
 
@@ -518,7 +512,7 @@ impl Cache {
     /// * `required_space` - A `usize` representing the number of bytes that must be freed to make room for a new file.
     /// * `new_file_priority` - A `usize` representing the priority of the new file to be added. If the priority of the files possibly being removed
     /// is greater than this value, then the files won't be removed.
-    fn make_room_for_new_file(&self, required_space: usize, new_file_priority: usize) -> Result<Vec<PathBuf>, CacheInvalidationError> {
+    fn make_room_for_new_file(&self, required_space: usize, new_file_priority: usize) -> Result<Vec<PathBuf>, CacheError> {
         let mut possibly_freed_space: usize = 0;
         let mut priority_score_to_free: usize = 0;
         let mut file_paths_to_remove: Vec<PathBuf> = vec![];
@@ -538,10 +532,10 @@ impl Cache {
                     // If it is, then don't free the files, as they in aggregate, are more important
                     // than the new file.
                     if priority_score_to_free > new_file_priority {
-                        return Err(CacheInvalidationError::NewPriorityIsNotHighEnough);
+                        return Err(CacheError::NewPriorityIsNotHighEnough);
                     }
                 }
-                None => return Err(CacheInvalidationError::NoMoreFilesToRemove),
+                None => return Err(CacheError::NoMoreFilesToRemove),
             };
         }
         Ok(file_paths_to_remove)
@@ -569,7 +563,13 @@ impl Cache {
         self.access_count_map.upsert(
             path.as_ref().to_path_buf(),
             AtomicUsize::new(1), // insert 1 if nothing at key
-            &|access_count| access_count.store(access_count.load(Ordering::Relaxed) + 1, Ordering::Relaxed), // increment by 1 if key found
+            &|access_count| {
+                let new_access_count: usize = match usize::checked_add(access_count.load(Ordering::Relaxed), 1) {
+                    Some(v) => v,
+                    None => usize::MAX
+                };
+                access_count.store( new_access_count, Ordering::Relaxed)
+            }, // increment by 1 if key found
         );
     }
 
@@ -986,6 +986,7 @@ mod tests {
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
 
+        #[allow(unused_variables)]
         let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
 
         let cache: Cache = Cache::new(MEG1 * 7 + 2000);

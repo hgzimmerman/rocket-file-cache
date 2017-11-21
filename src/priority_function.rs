@@ -5,12 +5,21 @@ use std::usize;
 /// This function takes the square root of the size of the file times the number of times it has been accessed.
 /// This should give some priority to bigger files, while still allowing some smaller files to enter the cache.
 pub fn default_priority_function(access_count: usize, size: usize) -> usize {
-    ((size as f64).sqrt() as usize) * access_count
+    match usize::checked_mul(
+        ((size as f64).sqrt() as usize),
+        access_count
+    ) {
+        Some(v) => v,
+        None => usize::MAX
+    }
 }
 
 /// Priority is calculated as the size times the access count.
 pub fn normal_priority_function(access_count: usize, size: usize) -> usize {
-    size * access_count
+    match usize::checked_mul(size, access_count) {
+        Some(v) => v,
+        None => usize::MAX
+    }
 }
 
 /// This priority function will value files in the cache based solely on the number of times the file was accessed.
