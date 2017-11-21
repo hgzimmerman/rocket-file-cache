@@ -17,7 +17,8 @@ pub enum CachedFile<'a> {
 impl<'a> CachedFile<'a> {
     /// A convince function that wraps the getting of a cached file.
     ///
-    /// This is done to keep the code as similar to the typical use of Rocket::response::NamedFile.
+    /// This is done to keep the code required to use the cache as similar to the typical use of
+    /// Rocket::response::NamedFile.
     pub fn open<P: AsRef<Path>>(path: P, cache: &'a Cache) -> Option<CachedFile<'a>> {
         cache.get(path)
     }
