@@ -26,7 +26,7 @@
 * The cache is now fully concurrent.
     * This means that the Cache no longer needs to be wrapped in a mutex.
     * Performance under heavy loads should be better.
-    * Calling `cache.get()` will return a struct that contains a lock to the file in the Cache.
+    * Calling `cache.get()` will return a ResponderFile that may contain a lock bound to the file in the Cache.
 
 
 ### Misc
@@ -65,3 +65,41 @@
 * Implemented `ResponderFile` as a replacement for `RespondableFile`.
     * `ResponderFile` is implemented as a normal enum, instead of the former tuple struct that wrapped an `Either<CachedFile,NamedFile>`.
  
+# 0.4.1
+### Misc
+* Changed the priority functions to be functions instead of constants. 
+* Changed `SizedFile` into `InMemoryFile`
+
+### Bug Fixes
+* Fixed a bug related to incrementing access counts and updating stats.
+
+# 0.4.0
+### Features
+* Return a `RespondableFile`, which wraps either a `rocket::response::NamedFile`, or a `CachedFile`.
+    * This allows the cache to return a NamedFile if it knows that the requested file will not make it into the cache.
+    * This vastly improves performance on cache-misses because creating a CachedFile requires reading the whole file into memory,
+    and then copying it when setting the response.
+    Responding with a NamedFile sets the response's body by directly reading the file, which is faster.
+
+# 0.3.0
+### Features
+* Added `CacheBuilder` that allows configuring the cache at instantiation.
+
+### Misc
+* Split project into multiple files.
+
+# 0.2.2
+### Misc
+* Added another constructor that takes a priority function, as well as the maximum size.
+
+# 0.2.1
+### Misc
+* Improved documentation
+
+# 0.2.0
+### Features
+* Added priority functions, allowing consumers of the crate to set the algorithm used to determine which files make it into the cache.
+
+
+# 0.1.0
+* Initial publish
