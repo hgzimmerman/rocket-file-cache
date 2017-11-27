@@ -1,4 +1,9 @@
 
+# 0.11.1
+### Misc
+* Removed `unwrap()`s from the Cache, making sure it will not `panic!`, even under very rare concurrent conditions.
+* Improved documentation. 
+
 # 0.11.0
 ### Misc
 * `Cache::get()` now returns just a `CachedFile` instead of an `Option<CachedFile>`

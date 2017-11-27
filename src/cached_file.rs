@@ -27,7 +27,7 @@ impl<'a> CachedFile<'a> {
     /// A convenience function that wraps the getting of a cached file.
     ///
     /// This is done to keep the code required to use the cache as similar to the typical use of
-    /// Rocket::response::NamedFile.
+    /// rocket::response::NamedFile.
     pub fn open<P: AsRef<Path>>(path: P, cache: &'a Cache) -> CachedFile<'a> {
         cache.get(path)
     }
