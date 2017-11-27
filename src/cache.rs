@@ -428,19 +428,22 @@ impl Cache {
                             // We have read a new file into memory, it is safe to
                             // remove the old files.
                             for file_key in files_to_be_removed {
-                                // The file was accessed with this key earlier when sorting priorities.
-                                // Unwrapping be safe.
-                                let _ = self.file_map.remove(&file_key).expect(
-                                    "Because the file was just accessed, it should be safe to remove it from the map.",
-                                );
+                                // The file was accessed with this key earlier when sorting priorities, which should make removal safe.
+                                match self.file_map.remove(&file_key) {
+                                    Some(_) => {},
+                                    None => warn!("Likely due to concurrent mutations, a file being removed from the cache was not found because another thread removed it first.")
+                                };
                             }
 
                             self.file_map.insert(path.clone(), file);
                             self.update_stats(&path);
 
-                            let cached_file: NamedInMemoryFile = NamedInMemoryFile::new(path.clone(), self.file_map.find(&path).unwrap());
+                            let named_in_memory_file: NamedInMemoryFile = NamedInMemoryFile::new(
+                                path.clone(),
+                                self.file_map.find(&path).unwrap() // TODO This, under very rare circumstances, could fail because the new file was removed by another thread before this lock could be made.
+                            );
 
-                            return CachedFile::from(cached_file);
+                            return CachedFile::from(named_in_memory_file);
                         }
                         Err(_) => return CachedFile::NotFound
                     }
@@ -486,9 +489,18 @@ impl Cache {
                 self.increment_access_count(&path);
                 self.update_stats(&path);
 
-                let cached_file = NamedInMemoryFile::new(
+                let cached_file: NamedInMemoryFile = NamedInMemoryFile::new(
                     path.as_ref().to_path_buf(),
-                    self.file_map.find(path.as_ref()).unwrap(),
+                    match self.file_map.find(path.as_ref()) {
+                        Some(accessor_to_file) => accessor_to_file,
+                        None => {
+                            // If for whatever reason, a concurrent remove operation removes the file
+                            // before it can be gotten via an accessor lock, recursively try to add
+                            // the file to the Cache until the lock can be attained.
+                            warn!("Tried to add file to cache, but it was removed before it could be added. Attempting to get file again.");
+                            return self.get_file_from_fs_and_add_to_cache(path);
+                        }
+                    }
                 );
 
                 return CachedFile::from(cached_file);
