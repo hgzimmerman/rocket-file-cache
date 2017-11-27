@@ -992,7 +992,7 @@ mod tests {
         #[allow(unused_variables)]
         let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
 
-        let cache: Cache = Cache::new(MEG1 * 7 + 2000);
+        let cache: Cache = Cache::new(MEG1 * 7 + 2000); // cache can hold a little more than 7MB
 
         println!("1:\n{:#?}", cache);
         let mut imf_5m: InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
@@ -1010,8 +1010,6 @@ mod tests {
         );
 
         println!("2:\n{:#?}", cache);
-//        assert!(cache.get(&path_2m).is_some());
-
         let mut imf_2m: InMemoryFile = InMemoryFile::open(path_2m.clone()).unwrap();
         imf_2m.stats.priority = 1448;
         imf_2m.stats.access_count = 1;
@@ -1045,7 +1043,6 @@ mod tests {
 
 
         println!("4:\n{:#?}", cache);
-
         let mut imf_1m: InMemoryFile = InMemoryFile::open(path_1m.clone()).unwrap();
         imf_1m.stats.priority = 2048; // This priority is higher than the in memory file - 2m's 1448, and therefore will replace it now
         imf_1m.stats.access_count = 1;
@@ -1068,15 +1065,15 @@ mod tests {
             assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
         }
 
-        // Get directly from the cache, no FS involved.
+
+        // Check if the 5m file is still in the cache
         if let None = cache.get_from_cache(&path_5m) {
-            assert_eq!(&path_5m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
-            // If this has failed, the cache removed the wrong file, implying the ordering of
-            // priorities is wrong. It should remove the path_2m file instead.
+            panic!("Expected 5m file to be in the cache");
         }
 
+        //
         if let Some(_) = cache.get_from_cache(&path_2m) {
-            assert_eq!(&path_2m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+            panic!("Expected 2m file to not be in the cache");
         }
 
         drop(cache);
