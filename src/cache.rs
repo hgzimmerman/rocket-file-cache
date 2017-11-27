@@ -655,7 +655,7 @@ mod tests {
     use in_memory_file::InMemoryFile;
     use concurrent_hashmap::Accessor;
     use std::sync::Arc;
-
+    use std::mem;
 
     const MEG1: usize = 1024 * 1024;
     const MEG2: usize = MEG1 * 2;
@@ -686,7 +686,8 @@ mod tests {
             match self {
                 CachedFile::InMemory(cached_file) => unsafe {
                     let file: *const Accessor<'a, PathBuf, InMemoryFile> = Arc::into_raw(cached_file.file);
-                    let _ = (*file).get().bytes.clone();
+                    let mut v: Vec<u8> = Vec::new();
+                    let _ = (*file).get().bytes.as_slice().read_to_end(&mut v).unwrap();
                     let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
                 },
                 CachedFile::FileSystem(mut named_file) => {
@@ -824,6 +825,8 @@ mod tests {
         });
     }
 
+
+
     // Constant time access regardless of size.
     #[bench]
     fn cache_get_1mb_from_1000_entry_cache(b: &mut Bencher) {
@@ -842,8 +845,11 @@ mod tests {
 
         assert_eq!(cache.used_bytes(), MEG1 * 2);
 
+        let named_file = CachedFile::from(NamedFile::open(&path_1m).unwrap());
+
         b.iter(|| {
             let cached_file = cache.get(&path_1m);
+            assert!(mem::discriminant(&cached_file) != mem::discriminant(&named_file));
             cached_file.dummy_write()
         });
     }
@@ -861,12 +867,12 @@ mod tests {
             cache.get(&path);
         }
         // make sure that the file has a high priority.
-        cache.alter_all_access_counts(|x| x + 1 * 100_000_000_000_000);
-        //        println!("{:#?}", cache);
+        cache.alter_all_access_counts(|x| x + 1 * 100_000_000_000_000_000);
+        let named_file = CachedFile::from(NamedFile::open(&path_1m).unwrap());
 
         b.iter(|| {
             let cached_file = cache.get(&path_1m);
-            // Mimic what is done when the response body is set.
+            assert!(mem::discriminant(&cached_file) == mem::discriminant(&named_file)); // get() in this case should only return files in the FS
             cached_file.dummy_write()
         });
     }
@@ -885,11 +891,13 @@ mod tests {
             cache.get(&path);
         }
         // make sure that the file has a high priority.
-        cache.alter_all_access_counts(|x| x + 1 * 100_000_000_000_000);
+        cache.alter_all_access_counts(|x| x + 1 * 100_000_000_000_000_000);
+        let named_file = CachedFile::from(NamedFile::open(&path_5m).unwrap());
 
         b.iter(|| {
             let cached_file: CachedFile = cache.get(&path_5m);
             // Mimic what is done when the response body is set.
+            assert!(mem::discriminant(&cached_file) == mem::discriminant(&named_file));  // get() in this case should only return files in the FS
             cached_file.dummy_write()
         });
     }
