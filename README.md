@@ -98,7 +98,8 @@ If you have any feature requests or notice any bugs, please open an Issue.
 
 I am rapidly developing this crate.
 I am changing the public interface on a regular basis.
-You should expect breaking changes pretty frequently until this reaches a 1.0.0 release.
+You should expect a few breaking changes before this reaches a 1.0.0 release.
+You can keep up to date with these changes with the [changelog](CHANGELOG.md)
 
 # Alternatives 
 * [Nginx](http://nginx.org/)
