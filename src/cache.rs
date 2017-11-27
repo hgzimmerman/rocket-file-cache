@@ -33,7 +33,7 @@ enum CacheError {
 /// When the cache is full, each file in the cache will have priority score determined by a provided
 /// priority function.
 /// When a call to `get()` is made, an access counter for the file in question is incremented,
-/// usually increasing the priority score of the file.
+/// usually (depending on the supplied priority function) increasing the priority score of the file.
 /// When a a new file is attempted to be stored, it will calculate the priority of the new score and
 /// compare that against the score of the file with the lowest priority in the cache.
 /// If the new file's priority is higher, then the file in the cache will be removed and replaced
@@ -48,9 +48,9 @@ enum CacheError {
 pub struct Cache {
     /// The number of bytes the file_map should be able hold at once.
     pub size_limit: usize,
-    /// The minimum number of bytes required for files that will be accepted into the Cache.
+    /// The minimum number of bytes a file must have in order to be accepted into the Cache.
     pub min_file_size: usize,
-    /// The maximum number of bytes required for files that will be accepted into the Cache.
+    /// The maximum number of bytes a file can have in order to be accepted into the Cache.
     pub max_file_size: usize,
     /// The function that is used to calculate the priority score that is used to determine which files should be in the cache.
     pub priority_function: fn(usize, usize) -> usize,
@@ -58,8 +58,6 @@ pub struct Cache {
     pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
-unsafe impl Send for Cache {}
-unsafe impl Sync for Cache {}
 
 impl Debug for Cache {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
@@ -242,7 +240,6 @@ impl Cache {
     pub fn contains_key<P: AsRef<Path>>(&self, path: P) -> bool {
         self.file_map.find(&path.as_ref().to_path_buf()).is_some()
     }
-
 
     /// Alters the access count value of one file in the access_count_map.
     /// # Arguments

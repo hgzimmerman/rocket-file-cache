@@ -5,7 +5,6 @@ extern crate rocket;
 extern crate rocket_file_cache;
 
 use rocket_file_cache::{Cache, CachedFile};
-use std::sync::Mutex;
 use std::path::{Path, PathBuf};
 use rocket::State;
 

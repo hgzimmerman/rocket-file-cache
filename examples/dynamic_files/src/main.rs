@@ -5,7 +5,6 @@ extern crate rocket;
 extern crate rocket_file_cache;
 
 use rocket_file_cache::{Cache, CachedFile};
-use std::sync::Mutex;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::io;
@@ -47,7 +46,7 @@ fn remove(file: PathBuf, cache: State<Cache>) {
     {
         // Reset the count to 0 so if a file with the same name is added in the future,
         // it won't immediately have the same priority as the file that was deleted here.
-        cache.alter_access_count(&path, |x| 0);
+        cache.alter_access_count(&path, |_x| 0);
     }
 }
 
