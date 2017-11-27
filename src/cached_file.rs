@@ -12,6 +12,7 @@ use named_in_memory_file::NamedInMemoryFile;
 pub enum CachedFile<'a> {
     Cached(NamedInMemoryFile<'a>),
     FileSystem(NamedFile),
+    FileNotFound
 }
 
 impl<'a> CachedFile<'a> {
@@ -19,7 +20,7 @@ impl<'a> CachedFile<'a> {
     ///
     /// This is done to keep the code required to use the cache as similar to the typical use of
     /// Rocket::response::NamedFile.
-    pub fn open<P: AsRef<Path>>(path: P, cache: &'a Cache) -> Option<CachedFile<'a>> {
+    pub fn open<P: AsRef<Path>>(path: P, cache: &'a Cache) -> CachedFile<'a> {
         cache.get(path)
     }
 }
@@ -43,6 +44,10 @@ impl<'a> Responder<'a> for CachedFile<'a> {
         match self {
             CachedFile::Cached(cached_file) => cached_file.respond_to(request),
             CachedFile::FileSystem(named_file) => named_file.respond_to(request),
+            CachedFile::FileNotFound => {
+                error!("Response was `FileNotFound`.",);
+                Err(Status::NotFound)
+            }
         }
     }
 }
@@ -55,6 +60,7 @@ impl<'a, 'b> PartialEq for CachedFile<'a> {
                 match *other {
                     CachedFile::Cached(ref rhs_cached_file) => (*rhs_cached_file.file).get() == (*lhs_cached_file.file).get(),
                     CachedFile::FileSystem(_) => false,
+                    CachedFile::FileNotFound => false
                 }
             }
             CachedFile::FileSystem(ref lhs_named_file) => {
@@ -64,6 +70,14 @@ impl<'a, 'b> PartialEq for CachedFile<'a> {
                         // This just compares the file paths
                         *lhs_named_file.path() == *rhs_named_file.path()
                     }
+                    CachedFile::FileNotFound => false
+                }
+            }
+            CachedFile::FileNotFound => {
+                match *other {
+                    CachedFile::Cached(_) => false,
+                    CachedFile::FileSystem(_) => false,
+                    CachedFile::FileNotFound => true
                 }
             }
         }

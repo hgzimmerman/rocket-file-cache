@@ -13,7 +13,7 @@ use rocket::Data;
 
 
 #[get("/<file..>")]
-fn files(file: PathBuf, cache: State<Cache> ) -> Option<CachedFile> {
+fn files(file: PathBuf, cache: State<Cache> ) -> CachedFile {
     let path: PathBuf = Path::new("www/").join(file).to_owned();
     cache.inner().get(&path) // Getting the file will add it to the cache if there is room.
 }
@@ -39,7 +39,7 @@ fn update(file: PathBuf, data: Data, cache: State<Cache>) -> io::Result<String> 
 #[delete("/<file..>")]
 fn remove(file: PathBuf, cache: State<Cache>) {
     let path: PathBuf = Path::new("www/").join(file).to_owned();
-    fs::remove_file(&path); // Remove the file from the FS.
+    let _ = fs::remove_file(&path); // Remove the file from the FS.
     {
         cache.remove(&path); // Remove the file from the cache.
     }

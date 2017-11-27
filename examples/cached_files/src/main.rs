@@ -10,7 +10,7 @@ use rocket::State;
 
 
 #[get("/<file..>")]
-fn files(file: PathBuf, cache: State<Cache> ) -> Option<CachedFile> {
+fn files(file: PathBuf, cache: State<Cache> ) -> CachedFile {
     CachedFile::open(Path::new("www/").join(file), cache.inner())
 }
 

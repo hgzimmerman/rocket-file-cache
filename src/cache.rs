@@ -124,13 +124,13 @@ impl Cache {
     ///
     ///
     /// #[get("/<file..>")]
-    /// fn files<'a>(file: PathBuf,  cache: State<'a, Cache> ) -> Option<CachedFile<'a>> {
+    /// fn files<'a>(file: PathBuf,  cache: State<'a, Cache> ) -> CachedFile<'a> {
     ///     let path: PathBuf = Path::new("www/").join(file).to_owned();
     ///     cache.inner().get(path)
     /// }
     /// # }
     /// ```
-    pub fn get<'a, P: AsRef<Path>>(&'a self, path: P) -> Option<CachedFile<'a>> {
+    pub fn get<'a, P: AsRef<Path>>(&'a self, path: P) -> CachedFile<'a> {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
 
@@ -140,10 +140,10 @@ impl Cache {
             self.update_stats(&path);
 
         } else {
-            return self.try_insert(path).ok();
+            return self.try_insert(path);
         }
 
-        Some(CachedFile::from(self.get_from_cache(&path).unwrap()))
+        self.get_from_cache(&path)
     }
 
 
@@ -267,7 +267,7 @@ impl Cache {
                 Some(access_count_entry) => {
                     new_count = alter_count_function(&access_count_entry.get().load(Ordering::Relaxed));
                 }
-                None => return false, // Can't update a file that isn't listed.
+                None => return false, // Can't update a file that isn't in the cache.
             }
         }
         {
@@ -379,13 +379,16 @@ impl Cache {
     /// look up the location of the file in the filesystem if the file is not in the cache.
     ///
     ///
-    fn try_insert<P: AsRef<Path>>(&self, path: P) -> Result<CachedFile, CacheError> {
+    fn try_insert<P: AsRef<Path>>(&self, path: P) -> CachedFile {
         let path: PathBuf = path.as_ref().to_path_buf();
         trace!("Trying to insert file {:?}", path);
 
         // If the FS can read metadata for a file, then the file exists, and it should be safe to increment
         // the access_count and update.
-        let size: usize = Cache::get_file_size_from_metadata(&path)?;
+        let size: usize = match Cache::get_file_size_from_metadata(&path) {
+            Ok(size) => size,
+            Err(_) => return CachedFile::FileNotFound // Could not open file to read metadata.
+        };
 
         // Determine how much space can still be used (represented by a negative value) or how much
         // space needs to be freed in order to make room for the new file
@@ -437,9 +440,9 @@ impl Cache {
 
                             let cached_file: NamedInMemoryFile = NamedInMemoryFile::new(path.clone(), self.file_map.find(&path).unwrap());
 
-                            return Ok(CachedFile::from(cached_file));
+                            return CachedFile::from(cached_file);
                         }
-                        Err(_) => return Err(CacheError::InvalidPath),
+                        Err(_) => return CachedFile::FileNotFound
                     }
                 }
                 Err(_) => {
@@ -448,8 +451,8 @@ impl Cache {
                     // into memory, and then copying it yet again when it is attached to the body of the
                     // response, use a NamedFile instead.
                     match NamedFile::open(path.clone()) {
-                        Ok(named_file) => Ok(CachedFile::from(named_file)),
-                        Err(_) => Err(CacheError::InvalidPath),
+                        Ok(named_file) => CachedFile::from(named_file),
+                        Err(_) => CachedFile::FileNotFound,
                     }
                 }
             }
@@ -459,14 +462,14 @@ impl Cache {
     /// Gets a file from the filesystem and converts it to a CachedFile.
     ///
     /// This should be used when the cache knows that the new file won't make it into the cache.
-    fn get_file_from_fs<P: AsRef<Path>>(&self, path: P) -> Result<CachedFile, CacheError> {
+    fn get_file_from_fs< P: AsRef<Path>>(&self, path: P) -> CachedFile{
         debug!("File does not fit size constraints of the cache.");
         match NamedFile::open(path.as_ref().to_path_buf()) {
             Ok(named_file) => {
                 self.increment_access_count(path);
-                return Ok(CachedFile::from(named_file));
+                return CachedFile::from(named_file);
             }
-            Err(_) => return Err(CacheError::InvalidPath),
+            Err(_) => return CachedFile::FileNotFound
         }
     }
 
@@ -474,7 +477,7 @@ impl Cache {
     ///
     /// This is the slowest operation the cache can perform, slower than just getting the file.
     /// It should only be used when the cache decides to store the file.
-    fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) -> Result<CachedFile, CacheError> {
+    fn get_file_from_fs_and_add_to_cache<P: AsRef<Path>>(&self, path: P) -> CachedFile {
         debug!("Cache has room for the file.");
         match InMemoryFile::open(&path) {
             Ok(file) => {
@@ -488,9 +491,9 @@ impl Cache {
                     self.file_map.find(path.as_ref()).unwrap(),
                 );
 
-                return Ok(CachedFile::from(cached_file));
+                return CachedFile::from(cached_file);
             }
-            Err(_) => return Err(CacheError::InvalidPath),
+            Err(_) => return CachedFile::FileNotFound,
         }
     }
 
@@ -539,15 +542,16 @@ impl Cache {
     }
 
     ///Helper function that gets the file from the cache if it exists there.
-    fn get_from_cache<P: AsRef<Path>>(&self, path: P) -> Option<NamedInMemoryFile> {
+    fn get_from_cache<P: AsRef<Path>>(&self, path: P) -> CachedFile {
         match self.file_map.find(&path.as_ref().to_path_buf()) {
             Some(in_memory_file) => {
-                Some(NamedInMemoryFile::new(
+                trace!("Found file: {:?} in cache.", path.as_ref());
+                CachedFile::from(NamedInMemoryFile::new(
                     path.as_ref().to_path_buf(),
                     in_memory_file,
                 ))
             }
-            None => None, // File not found
+            None => CachedFile::FileNotFound,
         }
 
     }
@@ -689,20 +693,24 @@ mod tests {
                     let mut v: Vec<u8> = Vec::new();
                     let _ = named_file.read_to_end(&mut v).unwrap();
                 }
+                CachedFile::FileNotFound => {
+                    panic!("tried to write using a non-existent file")
+                }
             }
         }
 
         fn get_in_memory_file(self) -> NamedInMemoryFile<'a> {
             match self {
                 CachedFile::Cached(n) => n,
-                CachedFile::FileSystem(_) => panic!("tried to get cached file for named file"),
+                _ => panic!("tried to get cached file for named file"),
+
             }
         }
 
         fn get_named_file(self) -> NamedFile {
             match self {
-                CachedFile::Cached(_) =>  panic!("tried to get cached file for named file"),
-                CachedFile::FileSystem(n) => n
+                CachedFile::FileSystem(n) => n,
+                _ =>  panic!("tried to get cached file for named file"),
             }
         }
     }
@@ -715,7 +723,7 @@ mod tests {
         cache.get(&path_10m); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get(&path_10m).unwrap();
+            let cached_file = cache.get(&path_10m);
             cached_file.dummy_write()
         });
     }
@@ -727,7 +735,7 @@ mod tests {
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
         b.iter(|| {
-            let cached_file = cache.get(&path_10m).unwrap();
+            let cached_file = cache.get(&path_10m);
             cached_file.dummy_write()
         });
     }
@@ -750,7 +758,7 @@ mod tests {
         cache.get(&path_1m); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get(&path_1m).unwrap();
+            let cached_file = cache.get(&path_1m);
             cached_file.dummy_write()
         });
     }
@@ -762,7 +770,7 @@ mod tests {
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
         b.iter(|| {
-            let cached_file = cache.get(&path_1m).unwrap();
+            let cached_file = cache.get(&path_1m);
             cached_file.dummy_write()
         });
     }
@@ -788,7 +796,7 @@ mod tests {
         cache.get(&path_5m); // add the 10 mb file to the cache
 
         b.iter(|| {
-            let cached_file = cache.get(&path_5m).unwrap();
+            let cached_file = cache.get(&path_5m);
             cached_file.dummy_write()
         });
     }
@@ -800,7 +808,7 @@ mod tests {
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
         b.iter(|| {
-            let cached_file = cache.get(&path_5m).unwrap();
+            let cached_file = cache.get(&path_5m);
             cached_file.dummy_write()
         });
     }
@@ -835,7 +843,7 @@ mod tests {
         assert_eq!(cache.used_bytes(), MEG1 * 2);
 
         b.iter(|| {
-            let cached_file = cache.get(&path_1m).unwrap();
+            let cached_file = cache.get(&path_1m);
             cached_file.dummy_write()
         });
     }
@@ -857,7 +865,7 @@ mod tests {
         //        println!("{:#?}", cache);
 
         b.iter(|| {
-            let cached_file = cache.get(&path_1m).unwrap();
+            let cached_file = cache.get(&path_1m);
             // Mimic what is done when the response body is set.
             cached_file.dummy_write()
         });
@@ -880,7 +888,7 @@ mod tests {
         cache.alter_all_access_counts(|x| x + 1 * 100_000_000_000_000);
 
         b.iter(|| {
-            let cached_file: CachedFile = cache.get(&path_5m).unwrap();
+            let cached_file: CachedFile = cache.get(&path_5m);
             // Mimic what is done when the response body is set.
             cached_file.dummy_write()
         });
@@ -912,7 +920,7 @@ mod tests {
         let named_file = NamedFile::open(path_10m.clone()).unwrap();
 
         // expect the cache to get the item from the FS.
-        assert_eq!(cache.try_insert(path_10m), Ok(CachedFile::from(named_file)));
+        assert_eq!(cache.try_insert(path_10m), CachedFile::from(named_file));
     }
 
 
@@ -942,7 +950,6 @@ mod tests {
         assert_eq!(
             cache
                 .try_insert(path_5m.clone())
-                .unwrap()
                 .get_in_memory_file()
                 .file
                 .as_ref()
@@ -952,12 +959,12 @@ mod tests {
         println!("1:\n{:#?}", cache);
         assert_eq!(
             cache.try_insert(path_1m.clone()),
-            Ok(CachedFile::from(named_file_1m))
+            CachedFile::from(named_file_1m)
         );
         println!("2:\n{:#?}", cache);
         assert_eq!(
             cache.try_insert(path_1m.clone()),
-            Ok(CachedFile::from(named_file_1m_2))
+            CachedFile::from(named_file_1m_2)
         );
         println!("3:\n{:#?}", cache);
 
@@ -968,7 +975,6 @@ mod tests {
         assert_eq!(
             cache
                 .try_insert(path_1m.clone())
-                .unwrap()
                 .get_in_memory_file()
                 .file
                 .as_ref()
@@ -1001,7 +1007,6 @@ mod tests {
 
         assert_eq!(
             cache.get(&path_5m)
-               .unwrap()
                .get_in_memory_file()
                .file
                .as_ref()
@@ -1015,7 +1020,6 @@ mod tests {
         imf_2m.stats.access_count = 1;
         assert_eq!(
             cache.get(&path_2m)
-                .unwrap()
                 .get_in_memory_file()
                 .file
                 .as_ref()
@@ -1029,7 +1033,6 @@ mod tests {
         let mut v: Vec<u8> = Vec::new();
         let _ = cache
             .get(&path_1m)
-            .unwrap()
             .get_named_file()
             .read_to_end(&mut v)
             .unwrap();
@@ -1051,7 +1054,6 @@ mod tests {
         // file is less than (sqrt(1)_size * 2_access) for the new file.
         assert_eq!(
             cache.get(&path_1m)
-                .unwrap()
                 .get_in_memory_file()
                 .file
                 .as_ref()
@@ -1061,18 +1063,18 @@ mod tests {
         );
         println!("5:\n{:#?}", cache);
 
-        if let None = cache.get_from_cache(&path_1m) {
-            assert_eq!(&path_1m, &PathBuf::new()) // this will fail, this comparison is just for debugging a failure.
+
+        if let CachedFile::FileNotFound = cache.get_from_cache(&path_1m) {
+            panic!("Expected 1m file to be in the cache");
         }
 
-
         // Check if the 5m file is still in the cache
-        if let None = cache.get_from_cache(&path_5m) {
+        if let CachedFile::FileNotFound = cache.get_from_cache(&path_5m) {
             panic!("Expected 5m file to be in the cache");
         }
 
         //
-        if let Some(_) = cache.get_from_cache(&path_2m) {
+        if let CachedFile::Cached(_) = cache.get_from_cache(&path_2m) {
             panic!("Expected 2m file to not be in the cache");
         }
 
@@ -1098,7 +1100,6 @@ mod tests {
         assert_eq!(
             cache
                 .get(&path_5m)
-                .unwrap()
                 .get_in_memory_file()
                 .file
                 .as_ref()
@@ -1120,9 +1121,10 @@ mod tests {
 
 
         assert_eq!(
-            match cache.get(&path_5m).unwrap() {
+            match cache.get(&path_5m) {
                 CachedFile::Cached(c) => c.file.get().stats.size,
                 CachedFile::FileSystem(_) => unreachable!(),
+                CachedFile::FileNotFound => unreachable!()
             },
             MEG5
         );
@@ -1133,9 +1135,10 @@ mod tests {
         cache.refresh(&path_5m);
 
         assert_eq!(
-            match cache.get(&path_of_file_with_10mb_but_path_name_5m).unwrap() {
+            match cache.get(&path_of_file_with_10mb_but_path_name_5m) {
                 CachedFile::Cached(c) => c.file.get().stats.size,
                 CachedFile::FileSystem(_) => unreachable!(),
+                CachedFile::FileNotFound => unreachable!()
             },
             MEG10
         );
