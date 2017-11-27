@@ -698,6 +698,13 @@ mod tests {
                 CachedFile::FileSystem(_) => panic!("tried to get cached file for named file"),
             }
         }
+
+        fn get_named_file(self) -> NamedFile {
+            match self {
+                CachedFile::Cached(_) =>  panic!("tried to get cached file for named file"),
+                CachedFile::FileSystem(n) => n
+            }
+        }
     }
 
     #[bench]
@@ -987,20 +994,74 @@ mod tests {
 
         let cache: Cache = Cache::new(MEG1 * 7 + 2000);
 
-        // TODO change these to useful assert_eq!s
         println!("1:\n{:#?}", cache);
-        assert!(cache.get(&path_5m).is_some());
+        let mut imf_5m: InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
+        imf_5m.stats.priority = 2289;
+        imf_5m.stats.access_count = 1;
+
+        assert_eq!(
+            cache.get(&path_5m)
+               .unwrap()
+               .get_in_memory_file()
+               .file
+               .as_ref()
+               .get(),
+            &imf_5m
+        );
 
         println!("2:\n{:#?}", cache);
-        assert!(cache.get(&path_2m).is_some());
+//        assert!(cache.get(&path_2m).is_some());
+
+        let mut imf_2m: InMemoryFile = InMemoryFile::open(path_2m.clone()).unwrap();
+        imf_2m.stats.priority = 1448;
+        imf_2m.stats.access_count = 1;
+        assert_eq!(
+            cache.get(&path_2m)
+                .unwrap()
+                .get_in_memory_file()
+                .file
+                .as_ref()
+                .get(),
+            &imf_2m
+        );
+
 
         println!("3:\n{:#?}", cache);
-        assert!(cache.get(&path_1m).is_some());
+        let mut named_1m = NamedFile::open(path_1m.clone()).unwrap();
+        let mut v: Vec<u8> = Vec::new();
+        let _ = cache
+            .get(&path_1m)
+            .unwrap()
+            .get_named_file()
+            .read_to_end(&mut v)
+            .unwrap();
+
+        let mut file_vec: Vec<u8> = Vec::new();
+        let _ = named_1m.read_to_end(&mut file_vec);
+        assert_eq!(
+            v,
+            file_vec
+        );
+
+
         println!("4:\n{:#?}", cache);
+
+        let mut imf_1m: InMemoryFile = InMemoryFile::open(path_1m.clone()).unwrap();
+        imf_1m.stats.priority = 2048; // This priority is higher than the in memory file - 2m's 1448, and therefore will replace it now
+        imf_1m.stats.access_count = 1;
+
         // The cache will now accept the 1 meg file because (sqrt(2)_size * 1_access) for the old
         // file is less than (sqrt(1)_size * 2_access) for the new file.
-        assert!(cache.get(&path_1m).is_some());
-
+        assert_eq!(
+            cache.get(&path_1m)
+                .unwrap()
+                .get_in_memory_file()
+                .file
+                .as_ref()
+                .get()
+                .bytes,
+            imf_1m.bytes
+        );
         println!("5:\n{:#?}", cache);
 
         if let None = cache.get_from_cache(&path_1m) {
@@ -1060,11 +1121,6 @@ mod tests {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
-
-        //        assert_eq!(
-        //            cache.get(&path_5m).unwrap(),
-        //            Some(CachedFile::from(cached_file))
-        //        );
 
         assert_eq!(
             match cache.get(&path_5m).unwrap() {
