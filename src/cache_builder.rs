@@ -25,7 +25,6 @@ pub struct CacheBuilder {
 }
 
 
-
 impl CacheBuilder {
     /// Create a new CacheBuilder.
     pub fn new(size_limit: usize) -> CacheBuilder {
@@ -39,6 +38,7 @@ impl CacheBuilder {
     }
 
     /// Sets the concurrency setting of the concurrent hashmap backing the cache.
+    /// A higher concurrency setting allows more threads to access the hashmap at the expense of more memory use.
     /// The default is 16.
     pub fn concurrency<'a>(&'a mut self, concurrency: u16) -> &mut Self {
         self.concurrency = Some(concurrency);

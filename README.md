@@ -38,8 +38,6 @@ fn main() {
 Rocket File Cache keeps a set of frequently accessed files in memory so your webserver won't have to wait for your disk to read the files.
 This should improve latency and throughput on systems that are bottlenecked on disk I/O.
 
-In environments where the files being served can all fit comfortably into the cache, and the files themselves are small, significant speedups for serving the files have been observed.
-
 If you are serving a known size of static files (index.html, js bundle, a couple of assets),
 you should try to set the maximum size of the cache to let them all fit,
 especially if all of these are served every time someone visits your website.
@@ -48,12 +46,12 @@ If you serve static files with a larger aggregate size than what would fit into 
 but you have some content that is visited more often than others, you should specify enough space for the cache
 so that the most popular content will fit.
 If your popular content changes over time, and you want the cache to reflect what is currently most popular,
-it is possible to use the `alter_access_count()` method to reduce the access count of all items currently in the cache,
+it is possible to use the `alter_all_access_counts()` method to reduce the access count of all items currently in the cache,
 making it easier for newer content to find its way into the cache.
 
 
 If you serve user created files, the same logic regarding file popularity applies,
-only that you may want to spawn a thread every 10000 or so requests that will use `alter_access_count()` 
+only that you may want to spawn a thread every 10000 or so requests that will use `alter_all_access_counts()` 
 to reduce the access counts of the items in the cache.
 
 ### Performance
@@ -99,7 +97,7 @@ If you have any feature requests or notice any bugs, please open an Issue.
 I am rapidly developing this crate.
 I am changing the public interface on a regular basis.
 You should expect a few breaking changes before this reaches a 1.0.0 release.
-You can keep up to date with these changes with the [changelog](CHANGELOG.md)
+You can keep up to date with these changes with the [changelog](CHANGELOG.md).
 
 # Alternatives 
 * [Nginx](http://nginx.org/)

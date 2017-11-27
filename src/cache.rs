@@ -849,7 +849,7 @@ mod tests {
             cache.get(&path);
         }
         // make sure that the file has a high priority.
-        cache.alter_all_access_counts(|x| x + 1 * 100000);
+        cache.alter_all_access_counts(|x| x + 1 * 100_000_000_000_000);
         //        println!("{:#?}", cache);
 
         b.iter(|| {
@@ -859,7 +859,7 @@ mod tests {
         });
     }
 
-    // This is pretty much a worst-case scenario, where every file would have to be removed to make room for the new file.
+    // This is pretty much a worst-case scenario, where every file would try to be removed to make room for the new file.
     // There is a penalty for missing the cache.
     #[bench]
     fn cache_miss_5mb_from_1000_entry_cache(b: &mut Bencher) {
@@ -873,7 +873,7 @@ mod tests {
             cache.get(&path);
         }
         // make sure that the file has a high priority.
-        cache.alter_all_access_counts(|x| x + 1 * 100000);
+        cache.alter_all_access_counts(|x| x + 1 * 100_000_000_000_000);
 
         b.iter(|| {
             let cached_file: CachedFile = cache.get(&path_5m).unwrap();
