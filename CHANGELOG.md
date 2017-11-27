@@ -1,4 +1,9 @@
 
+# 0.11.0
+### Misc
+* `Cache::get()` now returns just a `CachedFile` instead of an `Option<CachedFile>`
+    * `CachedFile` now handles the error case where the requested file cannot be found, supplanting the need for an `Option`.
+
 # 0.10.1
 ### Misc
 * Improved documentation.
