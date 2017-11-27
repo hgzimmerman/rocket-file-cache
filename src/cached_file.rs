@@ -8,11 +8,19 @@ use named_in_memory_file::NamedInMemoryFile;
 
 
 /// Wrapper around types that represent files and implement Responder<'static>.
+///
+/// When getting a `CachedFile` from the cache:
+/// An `InMemory` variant indicates that the file is now in the cache after the get.
+/// A `FileSystem` variant indicates that the file is not in the cache, but it can be found in the filesystem.
+/// A `NotFound` variant indicates that the file can not be found in the filesystem or the cache.
 #[derive(Debug)]
 pub enum CachedFile<'a> {
-    Cached(NamedInMemoryFile<'a>),
+    /// A file that has been loaded into the cache.
+    InMemory(NamedInMemoryFile<'a>),
+    /// A file that exists in the filesystem.
     FileSystem(NamedFile),
-    FileNotFound
+    /// The file does not exist in either the cache or the filesystem.
+    NotFound
 }
 
 impl<'a> CachedFile<'a> {
@@ -28,7 +36,7 @@ impl<'a> CachedFile<'a> {
 
 impl<'a> From<NamedInMemoryFile<'a>> for CachedFile<'a> {
     fn from(cached_file: NamedInMemoryFile<'a>) -> CachedFile<'a> {
-        CachedFile::Cached(cached_file)
+        CachedFile::InMemory(cached_file)
     }
 }
 
@@ -42,9 +50,9 @@ impl<'a> Responder<'a> for CachedFile<'a> {
     fn respond_to(self, request: &Request) -> Result<Response<'a>, Status> {
 
         match self {
-            CachedFile::Cached(cached_file) => cached_file.respond_to(request),
+            CachedFile::InMemory(cached_file) => cached_file.respond_to(request),
             CachedFile::FileSystem(named_file) => named_file.respond_to(request),
-            CachedFile::FileNotFound => {
+            CachedFile::NotFound => {
                 error!("Response was `FileNotFound`.",);
                 Err(Status::NotFound)
             }
@@ -56,28 +64,28 @@ impl<'a> Responder<'a> for CachedFile<'a> {
 impl<'a, 'b> PartialEq for CachedFile<'a> {
     fn eq(&self, other: &CachedFile) -> bool {
         match *self {
-            CachedFile::Cached(ref lhs_cached_file) => {
+            CachedFile::InMemory(ref lhs_cached_file) => {
                 match *other {
-                    CachedFile::Cached(ref rhs_cached_file) => (*rhs_cached_file.file).get() == (*lhs_cached_file.file).get(),
+                    CachedFile::InMemory(ref rhs_cached_file) => (*rhs_cached_file.file).get() == (*lhs_cached_file.file).get(),
                     CachedFile::FileSystem(_) => false,
-                    CachedFile::FileNotFound => false
+                    CachedFile::NotFound => false
                 }
             }
             CachedFile::FileSystem(ref lhs_named_file) => {
                 match *other {
-                    CachedFile::Cached(_) => false,
+                    CachedFile::InMemory(_) => false,
                     CachedFile::FileSystem(ref rhs_named_file) => {
                         // This just compares the file paths
                         *lhs_named_file.path() == *rhs_named_file.path()
                     }
-                    CachedFile::FileNotFound => false
+                    CachedFile::NotFound => false
                 }
             }
-            CachedFile::FileNotFound => {
+            CachedFile::NotFound => {
                 match *other {
-                    CachedFile::Cached(_) => false,
+                    CachedFile::InMemory(_) => false,
                     CachedFile::FileSystem(_) => false,
-                    CachedFile::FileNotFound => true
+                    CachedFile::NotFound => true
                 }
             }
         }

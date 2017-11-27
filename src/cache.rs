@@ -95,9 +95,9 @@ impl Cache {
     }
 
     /// Either gets the file from the cache if it exists there, gets it from the filesystem and
-    /// tries to cache it, or fails to find the file and returns None.
+    /// tries to cache it, or fails to find the file.
     ///
-    /// The CachedFile that is returned takes a lock out on that file in the cache.
+    /// The CachedFile that is returned takes a lock out on that file in the cache, if that file happens to exist in the cache.
     /// This lock will release when the CachedFile goes out of scope.
     ///
     /// # Arguments
@@ -387,7 +387,7 @@ impl Cache {
         // the access_count and update.
         let size: usize = match Cache::get_file_size_from_metadata(&path) {
             Ok(size) => size,
-            Err(_) => return CachedFile::FileNotFound // Could not open file to read metadata.
+            Err(_) => return CachedFile::NotFound // Could not open file to read metadata.
         };
 
         // Determine how much space can still be used (represented by a negative value) or how much
@@ -442,7 +442,7 @@ impl Cache {
 
                             return CachedFile::from(cached_file);
                         }
-                        Err(_) => return CachedFile::FileNotFound
+                        Err(_) => return CachedFile::NotFound
                     }
                 }
                 Err(_) => {
@@ -452,7 +452,7 @@ impl Cache {
                     // response, use a NamedFile instead.
                     match NamedFile::open(path.clone()) {
                         Ok(named_file) => CachedFile::from(named_file),
-                        Err(_) => CachedFile::FileNotFound,
+                        Err(_) => CachedFile::NotFound,
                     }
                 }
             }
@@ -469,7 +469,7 @@ impl Cache {
                 self.increment_access_count(path);
                 return CachedFile::from(named_file);
             }
-            Err(_) => return CachedFile::FileNotFound
+            Err(_) => return CachedFile::NotFound
         }
     }
 
@@ -493,7 +493,7 @@ impl Cache {
 
                 return CachedFile::from(cached_file);
             }
-            Err(_) => return CachedFile::FileNotFound,
+            Err(_) => return CachedFile::NotFound,
         }
     }
 
@@ -551,7 +551,7 @@ impl Cache {
                     in_memory_file,
                 ))
             }
-            None => CachedFile::FileNotFound,
+            None => CachedFile::NotFound,
         }
 
     }
@@ -684,7 +684,7 @@ mod tests {
     impl<'a> CachedFile<'a> {
         fn dummy_write(self) {
             match self {
-                CachedFile::Cached(cached_file) => unsafe {
+                CachedFile::InMemory(cached_file) => unsafe {
                     let file: *const Accessor<'a, PathBuf, InMemoryFile> = Arc::into_raw(cached_file.file);
                     let _ = (*file).get().bytes.clone();
                     let _ = Arc::from_raw(file); // To prevent a memory leak, an Arc needs to be reconstructed from the raw pointer.
@@ -693,7 +693,7 @@ mod tests {
                     let mut v: Vec<u8> = Vec::new();
                     let _ = named_file.read_to_end(&mut v).unwrap();
                 }
-                CachedFile::FileNotFound => {
+                CachedFile::NotFound => {
                     panic!("tried to write using a non-existent file")
                 }
             }
@@ -701,7 +701,7 @@ mod tests {
 
         fn get_in_memory_file(self) -> NamedInMemoryFile<'a> {
             match self {
-                CachedFile::Cached(n) => n,
+                CachedFile::InMemory(n) => n,
                 _ => panic!("tried to get cached file for named file"),
 
             }
@@ -1064,17 +1064,17 @@ mod tests {
         println!("5:\n{:#?}", cache);
 
 
-        if let CachedFile::FileNotFound = cache.get_from_cache(&path_1m) {
+        if let CachedFile::NotFound = cache.get_from_cache(&path_1m) {
             panic!("Expected 1m file to be in the cache");
         }
 
         // Check if the 5m file is still in the cache
-        if let CachedFile::FileNotFound = cache.get_from_cache(&path_5m) {
+        if let CachedFile::NotFound = cache.get_from_cache(&path_5m) {
             panic!("Expected 5m file to be in the cache");
         }
 
         //
-        if let CachedFile::Cached(_) = cache.get_from_cache(&path_2m) {
+        if let CachedFile::InMemory(_) = cache.get_from_cache(&path_2m) {
             panic!("Expected 2m file to not be in the cache");
         }
 
@@ -1122,9 +1122,9 @@ mod tests {
 
         assert_eq!(
             match cache.get(&path_5m) {
-                CachedFile::Cached(c) => c.file.get().stats.size,
+                CachedFile::InMemory(c) => c.file.get().stats.size,
                 CachedFile::FileSystem(_) => unreachable!(),
-                CachedFile::FileNotFound => unreachable!()
+                CachedFile::NotFound => unreachable!()
             },
             MEG5
         );
@@ -1136,9 +1136,9 @@ mod tests {
 
         assert_eq!(
             match cache.get(&path_of_file_with_10mb_but_path_name_5m) {
-                CachedFile::Cached(c) => c.file.get().stats.size,
+                CachedFile::InMemory(c) => c.file.get().stats.size,
                 CachedFile::FileSystem(_) => unreachable!(),
-                CachedFile::FileNotFound => unreachable!()
+                CachedFile::NotFound => unreachable!()
             },
             MEG10
         );
