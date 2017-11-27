@@ -3,6 +3,13 @@
 ### Misc
 * `Cache::get()` now returns just a `CachedFile` instead of an `Option<CachedFile>`
     * `CachedFile` now handles the error case where the requested file cannot be found, supplanting the need for an `Option`.
+    * A proper use of the cache now looks like: 
+```rust
+#[get("/<file..>")]
+fn files(file: PathBuf, cache: State<Cache> ) -> CachedFile {
+    CachedFile::open(Path::new("static/").join(file), cache.inner())
+}
+```
 
 # 0.10.1
 ### Misc

@@ -19,7 +19,7 @@ fn main() {
 Can be sped up by getting files via a cache instead:
 ```rust
 #[get("/<file..>")]
-fn files(file: PathBuf, cache: State<Cache> ) -> Option<CachedFile> {
+fn files(file: PathBuf, cache: State<Cache> ) -> CachedFile {
     CachedFile::open(Path::new("static/").join(file), cache.inner())
 }
 
