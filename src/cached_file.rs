@@ -7,12 +7,12 @@ use std::path::Path;
 use named_in_memory_file::NamedInMemoryFile;
 
 
-/// Wrapper around types that represent files and implement Responder<'static>.
+/// Wrapper around data that can represent a file - either in memory, or on disk.
 ///
 /// When getting a `CachedFile` from the cache:
-/// An `InMemory` variant indicates that the file is now in the cache after the get.
-/// A `FileSystem` variant indicates that the file is not in the cache, but it can be found in the filesystem.
-/// A `NotFound` variant indicates that the file can not be found in the filesystem or the cache.
+/// * An `InMemory` variant indicates that the file is now in the cache after the `get()`.
+/// * A `FileSystem` variant indicates that the file is not in the cache, but it can be accessed from the filesystem.
+/// * A `NotFound` variant indicates that the file can not be found in the filesystem or the cache.
 #[derive(Debug)]
 pub enum CachedFile<'a> {
     /// A file that has been loaded into the cache.

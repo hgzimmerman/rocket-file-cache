@@ -19,7 +19,7 @@ use std::fmt;
 /// The CachedFile knows its path, so it can set the content type when it is serialized to a response.
 pub struct NamedInMemoryFile<'a> {
     pub(crate) path: PathBuf,
-    pub(crate) file: Arc<Accessor<'a, PathBuf, InMemoryFile>>, // TODO, do I need this ARC?
+    pub(crate) file: Arc<Accessor<'a, PathBuf, InMemoryFile>>,
 }
 
 
@@ -31,7 +31,7 @@ impl<'a> Debug for NamedInMemoryFile<'a> {
 
 
 impl<'a> NamedInMemoryFile<'a> {
-    /// Reads the file at the path into a CachedFile.
+    /// Reads the file at the path into a NamedInMemoryFile.
     pub(crate) fn new<P: AsRef<Path>>(path: P, m: Accessor<'a, PathBuf, InMemoryFile>) -> NamedInMemoryFile<'a> {
         NamedInMemoryFile {
             path: path.as_ref().to_path_buf(),

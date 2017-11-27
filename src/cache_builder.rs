@@ -26,7 +26,12 @@ pub struct CacheBuilder {
 
 
 impl CacheBuilder {
+
     /// Create a new CacheBuilder.
+    ///
+    /// # Arguments
+    /// * size_limit - The number of bytes the cache will be able to hold.
+    ///
     pub fn new(size_limit: usize) -> CacheBuilder {
         CacheBuilder {
             size_limit,
