@@ -55,6 +55,7 @@ pub struct Cache {
     /// The function that is used to calculate the priority score that is used to determine which files should be in the cache.
     pub priority_function: fn(usize, usize) -> usize,
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
+    // TODO Consider transitioning the access_count_map back to a Hashmap, because it is already using an AtomicUsize, there shouldn't be any need for the locks provided by the ConcHashMap.
     pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
@@ -438,9 +439,31 @@ impl Cache {
                             self.file_map.insert(path.clone(), file);
                             self.update_stats(&path);
 
+                            let cache_file_accessor = match self.file_map.find(&path) {
+                                Some(accessor_to_file) => accessor_to_file,
+                                None => {
+                                    // If a concurrent remove operation removes the file before
+                                    // it can be gotten via an accessor lock, recursively try to add
+                                    // the file to the Cache until the lock can be attained.
+
+                                    // Because this action takes place after room was made for
+                                    // the new file in the cache, those files will be left out of the cache.
+                                    warn!("Tried to add file to cache, but it was removed before it could be added. Attempting to insert file again.");
+                                    // Because this recursion only occurs under extremely rare
+                                    // circumstances due to concurrent removal of the file being
+                                    // added between the insertion into the map, and locking an
+                                    // accessor, a stack overflow is almost impossible. This would require
+                                    // the file to be removed on every recursive attempt to re-insert it,
+                                    // with the exact same timing required to invalidate the `find()` method,
+                                    // for as many times as it takes to fill up the stack. It's not
+                                    // going to happen.
+                                    return self.try_insert(path);
+                                }
+                            };
+
                             let named_in_memory_file: NamedInMemoryFile = NamedInMemoryFile::new(
                                 path.clone(),
-                                self.file_map.find(&path).unwrap() // TODO This, under very rare circumstances, could fail because the new file was removed by another thread before this lock could be made.
+                                cache_file_accessor
                             );
 
                             return CachedFile::from(named_in_memory_file);
@@ -489,18 +512,23 @@ impl Cache {
                 self.increment_access_count(&path);
                 self.update_stats(&path);
 
+                let cache_file_accessor = match self.file_map.find(path.as_ref()) {
+                    Some(accessor_to_file) => accessor_to_file,
+                    None => {
+                        // If for whatever reason, a concurrent remove operation removes the file
+                        // before it can be gotten via an accessor lock, recursively try to add
+                        // the file to the Cache until the lock can be attained.
+                        warn!("Tried to add file to cache, but it was removed before it could be added. Attempting to get file again.");
+                        // Because this recursion only occurs under extremely rare circumstances
+                        // due to a concurrent removal of the file being added between the insertion
+                        // into the map, and locking an accessor, a stack overflow is almost impossible.
+                        return self.get_file_from_fs_and_add_to_cache(path);
+                    }
+                };
+
                 let cached_file: NamedInMemoryFile = NamedInMemoryFile::new(
                     path.as_ref().to_path_buf(),
-                    match self.file_map.find(path.as_ref()) {
-                        Some(accessor_to_file) => accessor_to_file,
-                        None => {
-                            // If for whatever reason, a concurrent remove operation removes the file
-                            // before it can be gotten via an accessor lock, recursively try to add
-                            // the file to the Cache until the lock can be attained.
-                            warn!("Tried to add file to cache, but it was removed before it could be added. Attempting to get file again.");
-                            return self.get_file_from_fs_and_add_to_cache(path);
-                        }
-                    }
+                    cache_file_accessor
                 );
 
                 return CachedFile::from(cached_file);
