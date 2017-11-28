@@ -106,3 +106,6 @@ Most of the work here focuses on when to replace items in the cache.
 If you know that you will never grow or shrink your cache of files, all you need is a 
 `Mutex<HashMap<PathBuf, Vec<u8>>>`, an `impl Responder<'static> for Vec<u8> {...}`, and some glue logic
 to hold your files in memory and serve them as responses.
+* Rely on setting the cache-control HTTP header to cause the files to be cached in end-user's browsers
+ and internet infrastructure between them and the server. This strategy can be used in conjunction with 
+ Rocket File Cache as well.
