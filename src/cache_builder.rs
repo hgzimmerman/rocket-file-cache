@@ -18,6 +18,7 @@ pub enum CacheBuildError {
 #[derive(Debug)]
 pub struct CacheBuilder {
     size_limit: usize,
+    accesses_per_refresh: Option<usize>,
     concurrency: Option<u16>,
     priority_function: Option<fn(usize, usize) -> usize>,
     min_file_size: Option<usize>,
@@ -35,6 +36,7 @@ impl CacheBuilder {
     pub fn new(size_limit: usize) -> CacheBuilder {
         CacheBuilder {
             size_limit,
+            accesses_per_refresh: None,
             concurrency: None,
             priority_function: None,
             min_file_size: None,
@@ -51,6 +53,16 @@ impl CacheBuilder {
     }
 
 
+    /// Sets the number of times a file can be accessed from the cache before it will be refreshed from the disk.
+    /// By providing 1000, that will instruct the cache to refresh the file every 1000 times its accessed.
+    /// By default, the cache will not refresh the file.
+    pub fn accesses_per_refresh<'a>(&'a mut self, accesses: usize) -> &mut Self {
+        // TODO: Handle 0 or 1 case
+        self.accesses_per_refresh = Some(accesses);
+        self
+    }
+
+
     /// Override the default priority function used for determining if the cache should hold a file.
     /// By default a score is calculated using the square root of the size of a file, times the number
     /// of times it was accessed.
@@ -62,6 +74,7 @@ impl CacheBuilder {
     /// The priority function should be kept simple, as it is calculated on every file in the cache
     /// every time a new file is attempted to be added.
     ///
+    /// # Example
     ///
     /// ```
     /// use rocket_file_cache::Cache;
@@ -145,6 +158,7 @@ impl CacheBuilder {
             min_file_size,
             max_file_size,
             priority_function,
+            accesses_per_refresh: self.accesses_per_refresh,
             file_map: ConcHashMap::with_options(options_files_map),
             access_count_map: ConcHashMap::with_options(options_access_map),
         })

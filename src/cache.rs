@@ -54,6 +54,8 @@ pub struct Cache {
     pub max_file_size: usize,
     /// The function that is used to calculate the priority score that is used to determine which files should be in the cache.
     pub priority_function: fn(usize, usize) -> usize,
+    /// If a given file's access count modulo this value equals 0, then that file will be refreshed from the FileSystem instead of from the Cache.
+    pub accesses_per_refresh: Option<usize>,
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
     // TODO Consider transitioning the access_count_map back to a Hashmap, because it is already using an AtomicUsize, there shouldn't be any need for the locks provided by the ConcHashMap.
     pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
@@ -91,6 +93,7 @@ impl Cache {
             min_file_size: 0,
             max_file_size: usize::MAX,
             priority_function: default_priority_function,
+            accesses_per_refresh: None,
             file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
             access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
         }
@@ -137,9 +140,23 @@ impl Cache {
         // First, try to get the file in the cache that corresponds to the desired path.
 
         if self.contains_key(&path.as_ref().to_path_buf()) {
-            // File is in the cache, increment the count
+            // File is in the cache, increment the count, update the stats attached to the cache entry.
             self.increment_access_count(&path);
             self.update_stats(&path);
+
+            // See if the file should be refreshed
+            if let Some(accesses_per_refresh) = self.accesses_per_refresh {
+                match self.access_count_map.find(&path.as_ref().to_path_buf()) {
+                    Some(a) => {
+                        let access_count: usize = a.get().load(Ordering::Relaxed);
+                        if access_count % accesses_per_refresh == 0 {
+                            info!( "Refreshing entry for path: {:?}", path.as_ref() );
+                            self.refresh(path.as_ref());
+                        }
+                    }
+                    None => warn!("Cache contains entry for {:?}, but does not tract its access counts.", path.as_ref())
+                }
+            }
 
         } else {
             return self.try_insert(path);
@@ -159,6 +176,7 @@ impl Cache {
     /// the file in the cache.
     /// The path will be used to find the new file in the filesystem and to find the old file to replace in
     /// the cache.
+    // TODO: Make this return a CachedFile
     pub fn refresh<P: AsRef<Path>>(&self, path: P) -> bool {
 
         let mut is_ok_to_refresh: bool = false;
