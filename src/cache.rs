@@ -148,7 +148,7 @@ impl Cache {
                         let access_count: usize = a.get().clone();
                         if access_count % accesses_per_refresh == 0 {
                             info!( "Refreshing entry for path: {:?}", path.as_ref() );
-                            self.refresh(path.as_ref());
+                            return self.refresh(path.as_ref())
                         }
                     }
                     None => warn!("Cache contains entry for {:?}, but does not tract its access counts.", path.as_ref())
