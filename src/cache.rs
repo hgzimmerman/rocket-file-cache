@@ -3,8 +3,6 @@ use std::usize;
 use rocket::response::NamedFile;
 use std::fs::Metadata;
 use std::fs;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use named_in_memory_file::NamedInMemoryFile;
 use cached_file::CachedFile;
 use in_memory_file::InMemoryFile;
