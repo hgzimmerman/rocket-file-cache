@@ -146,8 +146,9 @@ impl Cache {
                 match self.access_count_map.find(&path.as_ref().to_path_buf()) {
                     Some(a) => {
                         let access_count: usize = a.get().clone();
+                        // If the access count is a multiple of the refresh parameter, then refresh the file.
                         if access_count % accesses_per_refresh == 0 {
-                            info!( "Refreshing entry for path: {:?}", path.as_ref() );
+                            debug!( "Refreshing entry for path: {:?}", path.as_ref() );
                             return self.refresh(path.as_ref())
                         }
                     }
