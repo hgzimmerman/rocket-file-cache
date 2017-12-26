@@ -65,13 +65,13 @@ impl CacheBuilder {
     ///
     /// # Panics
     /// This function will panic if a 0 or 1 are supplied.
-    /// Something modulo 0 (used when calculating if the file will refresh) will result in an error.
+    /// Something modulo 0 (used when calculating if the file will refresh) will result in an error later.
     /// The cache would try to refresh on every access if 1 was used as the value, which is less
     /// efficient than just accessing the files directly.
     ///
     pub fn accesses_per_refresh<'a>(&'a mut self, accesses: usize) -> &mut Self {
         if accesses < 2 {
-            panic!("Incorrectly configured access_per_refresh rate. Values of 0 or 1 are not allowed as the cache should not automatically refresh every access");
+            panic!("Incorrectly configured access_per_refresh rate. Values of 0 or 1 are not allowed.");
         } else {
             self.accesses_per_refresh = Some(accesses);
         }
@@ -136,7 +136,7 @@ impl CacheBuilder {
     pub fn build(&self) -> Result<Cache, CacheBuildError> {
 
         let priority_function = match self.priority_function {
-            Some(p) => p,
+            Some(pf) => pf,
             None => default_priority_function,
         };
 
@@ -204,6 +204,7 @@ mod tests {
             .max_file_size(1024 * 1024 * 10)
             .min_file_size(1024 * 10)
             .concurrency(20)
+            .accesses_per_refresh(1000)
             .build()
             .unwrap();
     }
