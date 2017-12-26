@@ -84,6 +84,7 @@ impl Cache {
     /// use rocket_file_cache::Cache;
     /// let mut cache = Cache::new(1024 * 1024 * 30); // Create a cache that can hold 30 MB of files
     /// ```
+    #[deprecated(since="0.11.1", note="Please use CacheBuilder::new().build() instead.")]
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
