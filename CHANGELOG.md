@@ -1,3 +1,10 @@
+# 0.12.0
+
+### Features
+* Automatically refresh files in the cache based on a specified number of accesses.
+
+### Misc
+* `Cache::refresh()` now returns a `CachedFile` instead of a `bool`.
 
 # 0.11.1
 ### Misc

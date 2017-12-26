@@ -173,8 +173,7 @@ impl Cache {
     /// the file in the cache.
     /// The path will be used to find the new file in the filesystem and to find the old file to replace in
     /// the cache.
-    // TODO: Make this return a CachedFile
-    pub fn refresh<P: AsRef<Path>>(&self, path: P) -> bool {
+    pub fn refresh<P: AsRef<Path>>(&self, path: P) -> CachedFile {
 
         let mut is_ok_to_refresh: bool = false;
 
@@ -183,7 +182,7 @@ impl Cache {
             // See if the new file exists.
             let path_string: String = match path.as_ref().to_str() {
                 Some(s) => String::from(s),
-                None => return false,
+                None => return CachedFile::NotFound,
             };
             if let Ok(metadata) = fs::metadata(path_string.as_str()) {
                 if metadata.is_file() {
@@ -202,12 +201,13 @@ impl Cache {
                     self.file_map.remove(&path.as_ref().to_path_buf());
                     self.file_map.insert(path.as_ref().to_path_buf(), new_file);
                 }
+                self.update_stats(&path);
 
-                self.update_stats(path)
-
+                return self.get_from_cache(path)
             }
         }
-        is_ok_to_refresh
+
+        CachedFile::NotFound
     }
 
     /// Removes the file from the cache.
