@@ -56,9 +56,25 @@ impl CacheBuilder {
     /// Sets the number of times a file can be accessed from the cache before it will be refreshed from the disk.
     /// By providing 1000, that will instruct the cache to refresh the file every 1000 times its accessed.
     /// By default, the cache will not refresh the file.
+    ///
+    /// This should be useful if you anticipate bitrot for the cache contents in RAM, as it will
+    /// refresh the file from the FileSystem, meaning that if there is an error in the cached data,
+    /// it will only be served for an average of n/2 accesses before the automatic refresh replaces it
+    /// with an assumed correct copy.
+    /// Using ECC RAM should mitigate the possibility of bitrot.
+    ///
+    /// # Panics
+    /// This function will panic if a 0 or 1 are supplied.
+    /// Something modulo 0 (used when calculating if the file will refresh) will result in an error.
+    /// The cache would try to refresh on every access if 1 was used as the value, which is less
+    /// efficient than just accessing the files directly.
+    ///
     pub fn accesses_per_refresh<'a>(&'a mut self, accesses: usize) -> &mut Self {
-        // TODO: Handle 0 or 1 case
-        self.accesses_per_refresh = Some(accesses);
+        if accesses < 2 {
+            panic!("Incorrectly configured access_per_refresh rate. Values of 0 or 1 are not allowed as the cache should not automatically refresh every access");
+        } else {
+            self.accesses_per_refresh = Some(accesses);
+        }
         self
     }
 
