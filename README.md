@@ -85,9 +85,9 @@ The more items in the cache, the larger the time penalty for a cache miss.
 
 
 ### Requirements
-* Rocket >= 0.3.3
+* Rocket >= 0.3.5
 * Nightly Rust
-  * Known to work on (2017-10-22). 
+  * Known to work on (2017-12-25). 
   This crate doesn't use any special features of nightly, but is dependent on Rocket, which currently requires nightly.
 
 
