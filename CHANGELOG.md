@@ -5,6 +5,8 @@
 
 ### Misc
 * `Cache::refresh()` now returns a `CachedFile` instead of a `bool`.
+* Responding with a `NamedInMemoryFile` will set the raw body of the response instead of streaming the file.
+This should fix a bug regarding displaying estimated download times.
 
 # 0.11.1
 ### Misc
