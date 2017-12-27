@@ -7,10 +7,10 @@ use std::path::Path;
 use named_in_memory_file::NamedInMemoryFile;
 
 
-/// Wrapper around data that can represent a file - either in memory, or on disk.
+/// Wrapper around data that can represent a file - either in memory (cache), or on disk.
 ///
 /// When getting a `CachedFile` from the cache:
-/// * An `InMemory` variant indicates that the file is now in the cache after the `get()`.
+/// * An `InMemory` variant indicates that the file was read into the cache and a reference to that file is attached to the variant.
 /// * A `FileSystem` variant indicates that the file is not in the cache, but it can be accessed from the filesystem.
 /// * A `NotFound` variant indicates that the file can not be found in the filesystem or the cache.
 #[derive(Debug)]
@@ -24,6 +24,7 @@ pub enum CachedFile<'a> {
 }
 
 impl<'a> CachedFile<'a> {
+
     /// A convenience function that wraps the getting of a cached file.
     ///
     /// This is done to keep the code required to use the cache as similar to the typical use of

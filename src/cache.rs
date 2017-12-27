@@ -177,7 +177,8 @@ impl Cache {
     ///
     /// # Return
     ///
-    /// The CachedFile will indicate NotFound if the file isn't already in the cache or filesystem.
+    /// The CachedFile will indicate NotFound if the file isn't already in the cache or if it can't
+    /// be found in the filesystem.
     /// It will otherwise return a CachedFile::InMemory variant.
     pub fn refresh<P: AsRef<Path>>(&self, path: P) -> CachedFile {
 
