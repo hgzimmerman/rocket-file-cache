@@ -174,6 +174,11 @@ impl Cache {
     /// the file in the cache.
     /// The path will be used to find the new file in the filesystem and to find the old file to replace in
     /// the cache.
+    ///
+    /// # Return
+    ///
+    /// The CachedFile will indicate NotFound if the file isn't already in the cache or filesystem.
+    /// It will otherwise return a CachedFile::InMemory variant.
     pub fn refresh<P: AsRef<Path>>(&self, path: P) -> CachedFile {
 
         let mut is_ok_to_refresh: bool = false;
