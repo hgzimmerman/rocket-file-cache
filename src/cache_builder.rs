@@ -17,7 +17,7 @@ pub enum CacheBuildError {
 /// A builder for Caches.
 #[derive(Debug)]
 pub struct CacheBuilder {
-    size_limit: usize,
+    size_limit: Option<usize>,
     concurrency: Option<u16>,
     priority_function: Option<fn(usize, usize) -> usize>,
     min_file_size: Option<usize>,
@@ -29,17 +29,27 @@ impl CacheBuilder {
 
     /// Create a new CacheBuilder.
     ///
-    /// # Arguments
-    /// * size_limit - The number of bytes the cache will be able to hold.
-    ///
-    pub fn new(size_limit: usize) -> CacheBuilder {
+
+    pub fn new() -> CacheBuilder {
         CacheBuilder {
-            size_limit,
+            size_limit: None,
             concurrency: None,
             priority_function: None,
             min_file_size: None,
             max_file_size: None,
         }
+    }
+
+    /// Sets the maximum number of bytes (as they exist in the FS) that the cache can hold.
+    /// The cache will take up more space in memory due to the backing concurrent HashMap it uses.
+    /// The memory overhead can be controlled by setting the concurrency parameter.
+    ///
+    /// # Arguments
+    /// * size_limit - The number of bytes the cache will be able to hold.
+    ///
+    pub fn size_limit<'a>(&'a mut self, size_limit: usize) -> &mut Self {
+        self.size_limit = Some(size_limit);
+        self
     }
 
     /// Sets the concurrency setting of the concurrent hashmap backing the cache.
@@ -106,6 +116,14 @@ impl CacheBuilder {
     /// ```
     pub fn build(&self) -> Result<Cache, CacheBuildError> {
 
+        let size_limit: usize = match self.size_limit {
+            Some(s) => s,
+            None => {
+                warn!("Size for cache not configured. This may lead to the cache using more memory than necessary.");
+                usize::MAX
+            }
+        };
+
         let priority_function = match self.priority_function {
             Some(p) => p,
             None => default_priority_function,
@@ -141,7 +159,7 @@ impl CacheBuilder {
 
 
         Ok(Cache {
-            size_limit: self.size_limit,
+            size_limit: size_limit,
             min_file_size,
             max_file_size,
             priority_function,

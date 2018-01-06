@@ -61,7 +61,7 @@ impl<'a> Responder<'a> for CachedFile<'a> {
 }
 
 
-impl<'a, 'b> PartialEq for CachedFile<'a> {
+impl<'a> PartialEq for CachedFile<'a> {
     fn eq(&self, other: &CachedFile) -> bool {
         match *self {
             CachedFile::InMemory(ref lhs_cached_file) => {

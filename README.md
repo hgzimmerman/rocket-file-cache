@@ -42,7 +42,7 @@ If you are serving a known size of static files (index.html, js bundle, a couple
 you should try to set the maximum size of the cache to let them all fit,
 especially if all of these are served every time someone visits your website.
 
-If you serve static files with a larger aggregate size than what would fit into memory, 
+If you serve static files with a larger aggregate size than what would nicely fit into memory, 
 but you have some content that is visited more often than others, you should specify enough space for the cache
 so that the most popular content will fit.
 If your popular content changes over time, and you want the cache to reflect what is currently most popular,
@@ -92,11 +92,9 @@ The more items in the cache, the larger the time penalty for a cache miss.
 
 
 # Notes
-If you have any feature requests or notice any bugs, please open an Issue.
+If you have any feature requests, notice any bugs, or if anything in the documentation is unclear, please open an Issue and I will respond ASAP.
 
-I am rapidly developing this crate.
-I am changing the public interface on a regular basis.
-You should expect a few breaking changes before this reaches a 1.0.0 release.
+Development on this crate has slowed, but you should expect a couple more breaking changes before this reaches a 1.0.0 release.
 You can keep up to date with these changes with the [changelog](CHANGELOG.md).
 
 # Alternatives 
