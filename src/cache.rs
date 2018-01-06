@@ -3,8 +3,6 @@ use std::usize;
 use rocket::response::NamedFile;
 use std::fs::Metadata;
 use std::fs;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use named_in_memory_file::NamedInMemoryFile;
 use cached_file::CachedFile;
 use in_memory_file::InMemoryFile;
@@ -54,9 +52,10 @@ pub struct Cache {
     pub max_file_size: usize,
     /// The function that is used to calculate the priority score that is used to determine which files should be in the cache.
     pub priority_function: fn(usize, usize) -> usize,
+    /// If a given file's access count modulo this value equals 0, then that file will be refreshed from the FileSystem instead of from the Cache.
+    pub accesses_per_refresh: Option<usize>,
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
-    // TODO Consider transitioning the access_count_map back to a Hashmap, because it is already using an AtomicUsize, there shouldn't be any need for the locks provided by the ConcHashMap.
-    pub(crate) access_count_map: ConcHashMap<PathBuf, AtomicUsize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
+    pub(crate) access_count_map: ConcHashMap<PathBuf, usize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
 
 
@@ -84,14 +83,16 @@ impl Cache {
     /// use rocket_file_cache::Cache;
     /// let mut cache = Cache::new(1024 * 1024 * 30); // Create a cache that can hold 30 MB of files
     /// ```
+    #[deprecated(since="0.11.1", note="Please use CacheBuilder::new().build() instead.")]
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
             min_file_size: 0,
             max_file_size: usize::MAX,
             priority_function: default_priority_function,
+            accesses_per_refresh: None,
             file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
-            access_count_map: ConcHashMap::<PathBuf, AtomicUsize, RandomState>::new(),
+            access_count_map: ConcHashMap::<PathBuf, usize, RandomState>::new(),
         }
     }
 
@@ -136,9 +137,24 @@ impl Cache {
         // First, try to get the file in the cache that corresponds to the desired path.
 
         if self.contains_key(&path.as_ref().to_path_buf()) {
-            // File is in the cache, increment the count
+            // File is in the cache, increment the count, update the stats attached to the cache entry.
             self.increment_access_count(&path);
             self.update_stats(&path);
+
+            // See if the file should be refreshed
+            if let Some(accesses_per_refresh) = self.accesses_per_refresh {
+                match self.access_count_map.find(&path.as_ref().to_path_buf()) {
+                    Some(a) => {
+                        let access_count: usize = a.get().clone();
+                        // If the access count is a multiple of the refresh parameter, then refresh the file.
+                        if access_count % accesses_per_refresh == 0 {
+                            debug!( "Refreshing entry for path: {:?}", path.as_ref() );
+                            return self.refresh(path.as_ref())
+                        }
+                    }
+                    None => warn!("Cache contains entry for {:?}, but does not tract its access counts.", path.as_ref())
+                }
+            }
 
         } else {
             return self.try_insert(path);
@@ -158,7 +174,13 @@ impl Cache {
     /// the file in the cache.
     /// The path will be used to find the new file in the filesystem and to find the old file to replace in
     /// the cache.
-    pub fn refresh<P: AsRef<Path>>(&self, path: P) -> bool {
+    ///
+    /// # Return
+    ///
+    /// The CachedFile will indicate NotFound if the file isn't already in the cache or if it can't
+    /// be found in the filesystem.
+    /// It will otherwise return a CachedFile::InMemory variant.
+    pub fn refresh<P: AsRef<Path>>(&self, path: P) -> CachedFile {
 
         let mut is_ok_to_refresh: bool = false;
 
@@ -167,7 +189,7 @@ impl Cache {
             // See if the new file exists.
             let path_string: String = match path.as_ref().to_str() {
                 Some(s) => String::from(s),
-                None => return false,
+                None => return CachedFile::NotFound,
             };
             if let Ok(metadata) = fs::metadata(path_string.as_str()) {
                 if metadata.is_file() {
@@ -186,12 +208,13 @@ impl Cache {
                     self.file_map.remove(&path.as_ref().to_path_buf());
                     self.file_map.insert(path.as_ref().to_path_buf(), new_file);
                 }
+                self.update_stats(&path);
 
-                self.update_stats(path)
-
+                return self.get_from_cache(path)
             }
         }
-        is_ok_to_refresh
+
+        CachedFile::NotFound
     }
 
     /// Removes the file from the cache.
@@ -266,7 +289,7 @@ impl Cache {
         {
             match self.access_count_map.find(&path.as_ref().to_path_buf()) {
                 Some(access_count_entry) => {
-                    new_count = alter_count_function(&access_count_entry.get().load(Ordering::Relaxed));
+                    new_count = alter_count_function(&access_count_entry.get());
                 }
                 None => return false, // Can't update a file that isn't in the cache.
             }
@@ -274,7 +297,7 @@ impl Cache {
         {
             self.access_count_map.insert(
                 path.as_ref().to_path_buf(),
-                AtomicUsize::new(new_count),
+                new_count,
             );
         }
         self.update_stats(&path);
@@ -309,7 +332,7 @@ impl Cache {
         {
             all_counts = self.access_count_map
                 .iter()
-                .map(|x: (&PathBuf, &AtomicUsize)| x.0.clone())
+                .map(|x: (&PathBuf, &usize)| x.0.clone())
                 .collect();
         }
         for pathbuf in all_counts {
@@ -411,12 +434,11 @@ impl Cache {
             // Also, the size generally
             let new_file_priority: usize;
             {
-                let default_atomic_access_count = AtomicUsize::new(1);
-                let new_file_access_count: &AtomicUsize = match self.access_count_map.find(&path) {
+                let new_file_access_count: &usize = match self.access_count_map.find(&path) {
                     Some(access_count) => &access_count.get(),
-                    None => &default_atomic_access_count,
+                    None => &1,
                 };
-                new_file_priority = (self.priority_function)(new_file_access_count.load(Ordering::Relaxed), size);
+                new_file_priority = (self.priority_function)(new_file_access_count.clone(), size);
             }
 
 
@@ -602,14 +624,13 @@ impl Cache {
     fn increment_access_count<P: AsRef<Path>>(&self, path: P) {
         self.access_count_map.upsert(
             path.as_ref().to_path_buf(),
-            AtomicUsize::new(1), // insert 1 if nothing at key
+            1, // insert 1 if nothing at key. The closure will not execute.
             &|access_count| {
-                let new_access_count: usize = match usize::checked_add(access_count.load(Ordering::Relaxed), 1) {
-                    Some(v) => v,
-                    None => usize::MAX,
-                };
-                access_count.store(new_access_count, Ordering::Relaxed)
-            }, // increment by 1 if key found
+                *access_count = match usize::checked_add(access_count.clone(), 1) {
+                    Some(v) => v, // return the incremented value
+                    None => usize::MAX, // If the access count bumps up against the usize max, keep the value the same.
+                }
+            },
         );
     }
 
@@ -617,10 +638,9 @@ impl Cache {
     /// Update the stats associated with this file.
     fn update_stats<P: AsRef<Path>>(&self, path: P) {
 
-        let default_atomic_access_count = AtomicUsize::new(1);
-        let access_count: &AtomicUsize = match self.access_count_map.find(&path.as_ref().to_path_buf()) {
-            Some(access_count) => access_count.get(),
-            None => &default_atomic_access_count,
+        let access_count: usize = match self.access_count_map.find(&path.as_ref().to_path_buf()) {
+            Some(access_count) => access_count.get().clone(),
+            None => 1,
         };
 
         self.file_map.upsert(
@@ -641,7 +661,7 @@ impl Cache {
                 if file_entry.stats.size == 0 {
                     file_entry.stats.size = Cache::get_file_size_from_metadata(&path.as_ref().to_path_buf()).unwrap_or(0);
                 }
-                file_entry.stats.access_count = access_count.load(Ordering::Relaxed);
+                file_entry.stats.access_count = access_count;
                 file_entry.stats.priority = (self.priority_function)(file_entry.stats.access_count, file_entry.stats.size); // update the priority score.
             },
         );

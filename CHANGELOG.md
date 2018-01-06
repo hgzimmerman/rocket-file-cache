@@ -1,3 +1,17 @@
+# 0.13.0
+### Misc
+* `CacheBuilder::new()` no longer takes a `size_limit: usize` parameter.
+The maximum size can now be set with a `size_limit()` function on the builder.
+If the size is not set, the cache will assume it has a `usize::MAX` size, meaning that it will never rotate elements out of the cache.
+
+# 0.12.0
+### Features
+* Automatically refresh files in the cache based on a specified number of accesses.
+
+### Misc
+* `Cache::refresh()` now returns a `CachedFile` instead of a `bool`.
+* Responding with a `NamedInMemoryFile` will set the raw body of the response instead of streaming the file.
+This should fix a bug regarding displaying estimated download times.
 
 # 0.11.1
 ### Misc

@@ -18,6 +18,7 @@ pub enum CacheBuildError {
 #[derive(Debug)]
 pub struct CacheBuilder {
     size_limit: Option<usize>,
+    accesses_per_refresh: Option<usize>,
     concurrency: Option<u16>,
     priority_function: Option<fn(usize, usize) -> usize>,
     min_file_size: Option<usize>,
@@ -33,6 +34,7 @@ impl CacheBuilder {
     pub fn new() -> CacheBuilder {
         CacheBuilder {
             size_limit: None,
+            accesses_per_refresh: None,
             concurrency: None,
             priority_function: None,
             min_file_size: None,
@@ -61,6 +63,32 @@ impl CacheBuilder {
     }
 
 
+    /// Sets the number of times a file can be accessed from the cache before it will be refreshed from the disk.
+    /// By providing 1000, that will instruct the cache to refresh the file every 1000 times its accessed.
+    /// By default, the cache will not refresh the file.
+    ///
+    /// This should be useful if you anticipate bitrot for the cache contents in RAM, as it will
+    /// refresh the file from the FileSystem, meaning that if there is an error in the cached data,
+    /// it will only be served for an average of n/2 accesses before the automatic refresh replaces it
+    /// with an assumed correct copy.
+    /// Using ECC RAM should mitigate the possibility of bitrot.
+    ///
+    /// # Panics
+    /// This function will panic if a 0 or 1 are supplied.
+    /// Something modulo 0 (used when calculating if the file will refresh) will result in an error later.
+    /// The cache would try to refresh on every access if 1 was used as the value, which is less
+    /// efficient than just accessing the files directly.
+    ///
+    pub fn accesses_per_refresh<'a>(&'a mut self, accesses: usize) -> &mut Self {
+        if accesses < 2 {
+            panic!("Incorrectly configured access_per_refresh rate. Values of 0 or 1 are not allowed.");
+        } else {
+            self.accesses_per_refresh = Some(accesses);
+        }
+        self
+    }
+
+
     /// Override the default priority function used for determining if the cache should hold a file.
     /// By default a score is calculated using the square root of the size of a file, times the number
     /// of times it was accessed.
@@ -72,6 +100,7 @@ impl CacheBuilder {
     /// The priority function should be kept simple, as it is calculated on every file in the cache
     /// every time a new file is attempted to be added.
     ///
+    /// # Example
     ///
     /// ```
     /// use rocket_file_cache::Cache;
@@ -125,7 +154,7 @@ impl CacheBuilder {
         };
 
         let priority_function = match self.priority_function {
-            Some(p) => p,
+            Some(pf) => pf,
             None => default_priority_function,
         };
 
@@ -163,6 +192,7 @@ impl CacheBuilder {
             min_file_size,
             max_file_size,
             priority_function,
+            accesses_per_refresh: self.accesses_per_refresh,
             file_map: ConcHashMap::with_options(options_files_map),
             access_count_map: ConcHashMap::with_options(options_access_map),
         })
@@ -192,6 +222,7 @@ mod tests {
             .max_file_size(1024 * 1024 * 10)
             .min_file_size(1024 * 10)
             .concurrency(20)
+            .accesses_per_refresh(1000)
             .build()
             .unwrap();
     }
