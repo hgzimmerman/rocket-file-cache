@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn min_greater_than_max() {
 
-        let e: CacheBuildError = CacheBuilder::new(1024 * 1024 * 10)
+        let e: CacheBuildError = CacheBuilder::new()
             .min_file_size(1024 * 1024 * 5)
             .max_file_size(1024 * 1024 * 4)
             .build()
@@ -217,7 +217,8 @@ mod tests {
 
     #[test]
     fn all_options_used_in_build() {
-        let _: Cache = CacheBuilder::new(1024 * 1024 * 20)
+        let _: Cache = CacheBuilder::new()
+            .size_limit(1024 * 1024 * 20)
             .priority_function(|access_count: usize, size: usize| access_count * size)
             .max_file_size(1024 * 1024 * 10)
             .min_file_size(1024 * 10)

@@ -25,7 +25,11 @@ fn files(file: PathBuf, cache: State<Cache> ) -> CachedFile {
 
 
 fn main() {
-    let cache: Cache = Cache::new(1024 * 1024 * 40); // 40 MB
+    let cache: Cache = CacheBuilder::new()
+        .size_limit(1024 * 1024 * 40) // 40 MB
+        .build()
+        .unwrap();
+
     rocket::ignite()
         .manage(cache)
         .mount("/", routes![files])
