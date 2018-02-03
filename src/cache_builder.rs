@@ -1,10 +1,11 @@
-use cache::Cache;
+use cache::{Cache, AgeOut};
 
 use priority_function::default_priority_function;
 use std::usize;
 
 use concurrent_hashmap::{ConcHashMap, Options};
 use std::collections::hash_map::RandomState;
+use std::sync::atomic::AtomicUsize;
 
 
 
@@ -23,6 +24,7 @@ pub struct CacheBuilder {
     priority_function: Option<fn(usize, usize) -> usize>,
     min_file_size: Option<usize>,
     max_file_size: Option<usize>,
+    age_out: Option<AgeOut>
 }
 
 
@@ -39,7 +41,16 @@ impl CacheBuilder {
             priority_function: None,
             min_file_size: None,
             max_file_size: None,
+            age_out: None,
         }
+    }
+
+    pub fn age_out<'a>(&'a mut self, accesses_limit: usize, age_out_function: fn(&AtomicUsize)) {
+        self.age_out = Some(AgeOut {
+            accesses_limit,
+            access_count: AtomicUsize::from(0),
+            age_out_function,
+        });
     }
 
     /// Sets the maximum number of bytes (as they exist in the FS) that the cache can hold.
@@ -143,7 +154,7 @@ impl CacheBuilder {
     ///     .build()
     ///     .unwrap();
     /// ```
-    pub fn build(&self) -> Result<Cache, CacheBuildError> {
+    pub fn build(self) -> Result<Cache, CacheBuildError> {
 
         let size_limit: usize = match self.size_limit {
             Some(s) => s,
@@ -192,6 +203,7 @@ impl CacheBuilder {
             min_file_size,
             max_file_size,
             priority_function,
+            age_out: self.age_out,
             accesses_per_refresh: self.accesses_per_refresh,
             file_map: ConcHashMap::with_options(options_files_map),
             access_count_map: ConcHashMap::with_options(options_access_map),

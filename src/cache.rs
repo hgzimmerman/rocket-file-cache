@@ -13,6 +13,8 @@ use std::fmt::Debug;
 use std::fmt;
 use std::fmt::Formatter;
 use in_memory_file::FileStats;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 #[derive(Debug, PartialEq)]
 enum CacheError {
@@ -20,6 +22,22 @@ enum CacheError {
     NewPriorityIsNotHighEnough,
     InvalidMetadata,
     InvalidPath,
+}
+
+/// Holds related information used for "ageing out" files in the cache.
+pub struct AgeOut {
+    /// If the cachewide age out access count modulo this value in 0, then the age out function will execute.
+    pub accesses_limit: usize,
+    /// Counts the number of accesses the whole cache has.
+    pub access_count: AtomicUsize,
+    /// The function that runs to reduce the overall per-file access counts, allowing newer items to gain relative precedence faster.
+    pub age_out_function: fn(&AtomicUsize),
+}
+
+impl Debug for AgeOut {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "accesses_limit: {}, access_count: {}", self.accesses_limit, self.access_count.load(Ordering::Relaxed))
+    }
 }
 
 
@@ -52,6 +70,8 @@ pub struct Cache {
     pub max_file_size: usize,
     /// The function that is used to calculate the priority score that is used to determine which files should be in the cache.
     pub priority_function: fn(usize, usize) -> usize,
+    /// Related data used for "aging out" files in the cache.
+    pub age_out: Option<AgeOut>,
     /// If a given file's access count modulo this value equals 0, then that file will be refreshed from the FileSystem instead of from the Cache.
     pub accesses_per_refresh: Option<usize>,
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
@@ -70,6 +90,7 @@ impl Debug for Cache {
 }
 
 impl Cache {
+
     /// Creates a new Cache with the given size limit, no limits on individual file size, and the default priority function.
     /// These settings can be set by using the CacheBuilder instead.
     ///
@@ -83,7 +104,7 @@ impl Cache {
     /// use rocket_file_cache::Cache;
     /// let mut cache = Cache::new(1024 * 1024 * 30); // Create a cache that can hold 30 MB of files
     /// ```
-    #[deprecated(since="0.11.1", note="Please use CacheBuilder::new().build() instead.")]
+    #[deprecated(since="0.11.1", note="Please use CacheBuilder::new().size_limit(usize).build() instead.")]
     pub fn new(size_limit: usize) -> Cache {
         Cache {
             size_limit,
@@ -91,9 +112,14 @@ impl Cache {
             max_file_size: usize::MAX,
             priority_function: default_priority_function,
             accesses_per_refresh: None,
+            age_out: None,
             file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
             access_count_map: ConcHashMap::<PathBuf, usize, RandomState>::new(),
         }
+    }
+
+    fn record_access_and_possibly_age_out(&self){
+
     }
 
     /// Either gets the file from the cache if it exists there, gets it from the filesystem and
@@ -144,8 +170,8 @@ impl Cache {
             // See if the file should be refreshed
             if let Some(accesses_per_refresh) = self.accesses_per_refresh {
                 match self.access_count_map.find(&path.as_ref().to_path_buf()) {
-                    Some(a) => {
-                        let access_count: usize = a.get().clone();
+                    Some(accesses) => {
+                        let access_count: usize = accesses.get().clone();
                         // If the access count is a multiple of the refresh parameter, then refresh the file.
                         if access_count % accesses_per_refresh == 0 {
                             debug!( "Refreshing entry for path: {:?}", path.as_ref() );
@@ -632,6 +658,14 @@ impl Cache {
                 }
             },
         );
+        if let Some(age_out) = self.age_out {
+            age_out.access_count.fetch_add(1, Ordering::Relaxed);
+            if age_out.access_count.load(Ordering::Relaxed) == age_out.accesses_limit {
+                self.access_count_map.iter().for_each(|x| {
+                    (age_out.age_out_function)(x.1)
+                })
+            }
+        }
     }
 
 
