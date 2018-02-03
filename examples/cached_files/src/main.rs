@@ -7,7 +7,7 @@ extern crate rocket_file_cache;
 #[cfg(test)]
 mod tests;
 
-use rocket_file_cache::{Cache, CachedFile};
+use rocket_file_cache::{Cache, CacheBuilder, CachedFile};
 use std::path::{Path, PathBuf};
 use rocket::State;
 use rocket::Rocket;
@@ -24,7 +24,10 @@ fn main() {
 }
 
 fn rocket() -> Rocket {
-    let cache: Cache = Cache::new(1024 * 1024 * 40); // 40 MB
+    let cache: Cache = CacheBuilder::new()
+        .size_limit(1024 * 1024 * 40) // 40Mb
+        .build()
+        .unwrap();
     rocket::ignite()
         .manage(cache)
         .mount("/", routes![files])
