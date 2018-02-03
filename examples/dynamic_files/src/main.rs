@@ -4,7 +4,7 @@
 extern crate rocket;
 extern crate rocket_file_cache;
 
-use rocket_file_cache::{Cache, CachedFile};
+use rocket_file_cache::{Cache, CacheBuilder, CachedFile};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::io;
@@ -52,7 +52,10 @@ fn remove(file: PathBuf, cache: State<Cache>) {
 
 
 fn main() {
-    let cache: Cache = Cache::new(1024 * 1024 * 20); // 20 MB
+    let cache: Cache = CacheBuilder::new()
+        .size_limit(1024 * 1024 * 20) // 20 MB
+        .build()
+        .unwrap();
     rocket::ignite()
         .manage(cache)
         .mount("/", routes![files, remove, upload, update])

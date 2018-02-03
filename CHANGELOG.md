@@ -1,8 +1,9 @@
-# 0.13.0
+# 1.0.0-beta
 ### Misc
 * `CacheBuilder::new()` no longer takes a `size_limit: usize` parameter.
 The maximum size can now be set with a `size_limit()` function on the builder.
 If the size is not set, the cache will assume it has a `usize::MAX` size, meaning that it will never rotate elements out of the cache.
+* `Cache::new()` removed. Use CacheBuilder::new().build().unwrap() instead.
 
 # 0.12.0
 ### Features

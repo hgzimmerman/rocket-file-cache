@@ -6,7 +6,6 @@ use std::fs;
 use named_in_memory_file::NamedInMemoryFile;
 use cached_file::CachedFile;
 use in_memory_file::InMemoryFile;
-use priority_function::default_priority_function;
 use concurrent_hashmap::ConcHashMap;
 use std::collections::hash_map::RandomState;
 use std::fmt::Debug;
@@ -45,15 +44,15 @@ enum CacheError {
 /// in which case, the new file isn't inserted.
 pub struct Cache {
     /// The number of bytes the file_map should be able hold at once.
-    pub size_limit: usize,
+    pub(crate) size_limit: usize,
     /// The minimum number of bytes a file must have in order to be accepted into the Cache.
-    pub min_file_size: usize,
+    pub(crate) min_file_size: usize,
     /// The maximum number of bytes a file can have in order to be accepted into the Cache.
-    pub max_file_size: usize,
+    pub(crate) max_file_size: usize,
     /// The function that is used to calculate the priority score that is used to determine which files should be in the cache.
-    pub priority_function: fn(usize, usize) -> usize,
+    pub(crate) priority_function: fn(usize, usize) -> usize,
     /// If a given file's access count modulo this value equals 0, then that file will be refreshed from the FileSystem instead of from the Cache.
-    pub accesses_per_refresh: Option<usize>,
+    pub(crate) accesses_per_refresh: Option<usize>,
     pub(crate) file_map: ConcHashMap<PathBuf, InMemoryFile, RandomState>, // Holds the files that the cache is caching
     pub(crate) access_count_map: ConcHashMap<PathBuf, usize, RandomState>, // Every file that is accessed will have the number of times it is accessed logged in this map.
 }
@@ -70,31 +69,6 @@ impl Debug for Cache {
 }
 
 impl Cache {
-    /// Creates a new Cache with the given size limit, no limits on individual file size, and the default priority function.
-    /// These settings can be set by using the CacheBuilder instead.
-    ///
-    /// # Arguments
-    ///
-    /// * `size_limit` - The number of bytes that the Cache is allowed to hold at a given time.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rocket_file_cache::Cache;
-    /// let mut cache = Cache::new(1024 * 1024 * 30); // Create a cache that can hold 30 MB of files
-    /// ```
-    #[deprecated(since="0.11.1", note="Please use CacheBuilder::new().build() instead.")]
-    pub fn new(size_limit: usize) -> Cache {
-        Cache {
-            size_limit,
-            min_file_size: 0,
-            max_file_size: usize::MAX,
-            priority_function: default_priority_function,
-            accesses_per_refresh: None,
-            file_map: ConcHashMap::<PathBuf, InMemoryFile, RandomState>::new(),
-            access_count_map: ConcHashMap::<PathBuf, usize, RandomState>::new(),
-        }
-    }
 
     /// Either gets the file from the cache if it exists there, gets it from the filesystem and
     /// tries to cache it, or fails to find the file.
@@ -228,10 +202,10 @@ impl Cache {
     /// # Example
     ///
     /// ```
-    /// use rocket_file_cache::Cache;
+    /// use rocket_file_cache::{Cache, CacheBuilder};
     /// use std::path::PathBuf;
     ///
-    /// let mut cache = Cache::new(1024 * 1024 * 10);
+    /// let mut cache = CacheBuilder::new().build().unwrap();
     /// let pathbuf = PathBuf::new();
     /// cache.remove(&pathbuf);
     /// assert!(cache.contains_key(&pathbuf) == false);
@@ -253,10 +227,10 @@ impl Cache {
     /// # Example
     ///
     /// ```
-    /// use rocket_file_cache::Cache;
+    /// use rocket_file_cache::{CacheBuilder};
     /// use std::path::PathBuf;
     ///
-    /// let mut cache = Cache::new(1024 * 1024 * 20);
+    /// let mut cache = CacheBuilder::new().build().unwrap();
     /// let pathbuf: PathBuf = PathBuf::new();
     /// cache.get(&pathbuf);
     /// assert!(cache.contains_key(&pathbuf) == false);
@@ -274,10 +248,10 @@ impl Cache {
     /// # Example
     ///
     /// ```
-    /// use rocket_file_cache::Cache;
+    /// use rocket_file_cache::{Cache, CacheBuilder};
     /// use std::path::PathBuf;
     ///
-    /// let mut cache = Cache::new(1024 * 1024 * 10);
+    /// let mut cache = CacheBuilder::new().build().unwrap();
     /// let pathbuf = PathBuf::new();
     /// cache.get(&pathbuf); // Add a file to the cache
     /// cache.remove(&pathbuf); // Removing the file will not reset its access count.
@@ -314,10 +288,10 @@ impl Cache {
     /// # Example
     ///
     /// ```
-    /// use rocket_file_cache::Cache;
+    /// use rocket_file_cache::{Cache, CacheBuilder};
     /// use std::path::PathBuf;
     ///
-    /// let mut cache = Cache::new(1024 * 1024 * 10);
+    /// let mut cache = CacheBuilder::new().build().unwrap();
     /// let pathbuf = PathBuf::new();
     /// let other_pathbuf = PathBuf::new();
     /// cache.get(&pathbuf);
@@ -346,9 +320,9 @@ impl Cache {
     /// # Example
     ///
     /// ```
-    /// use rocket_file_cache::Cache;
+    /// use rocket_file_cache::{Cache, CacheBuilder};
     ///
-    /// let cache = Cache::new(1024 * 1024 * 30);
+    /// let cache = CacheBuilder::new().build().unwrap();
     /// assert!(cache.used_bytes() == 0);
     /// ```
     pub fn used_bytes(&self) -> usize {
@@ -716,6 +690,7 @@ mod tests {
     use concurrent_hashmap::Accessor;
     use std::sync::Arc;
     use std::mem;
+    use cache_builder::CacheBuilder;
 
     const MEG1: usize = 1024 * 1024;
     const MEG2: usize = MEG1 * 2;
@@ -778,7 +753,10 @@ mod tests {
 
     #[bench]
     fn cache_get_10mb(b: &mut Bencher) {
-        let cache: Cache = Cache::new(MEG1 * 20); //Cache can hold 20Mb
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 20)
+            .build()
+            .unwrap();
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
         cache.get(&path_10m); // add the 10 mb file to the cache
@@ -791,7 +769,10 @@ mod tests {
 
     #[bench]
     fn cache_miss_10mb(b: &mut Bencher) {
-        let cache: Cache = Cache::new(0);
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(0)
+            .build()
+            .unwrap();
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
@@ -813,7 +794,10 @@ mod tests {
 
     #[bench]
     fn cache_get_1mb(b: &mut Bencher) {
-        let cache: Cache = Cache::new(MEG1 * 20); //Cache can hold 20Mb
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 20)
+            .build()
+            .unwrap(); //Cache can hold 20Mb
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
         cache.get(&path_1m); // add the 10 mb file to the cache
@@ -826,7 +810,10 @@ mod tests {
 
     #[bench]
     fn cache_miss_1mb(b: &mut Bencher) {
-        let cache: Cache = Cache::new(0);
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(0)
+            .build()
+            .unwrap();
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
 
@@ -851,7 +838,10 @@ mod tests {
 
     #[bench]
     fn cache_get_5mb(b: &mut Bencher) {
-        let cache: Cache = Cache::new(MEG1 * 20); //Cache can hold 20Mb
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 20)
+            .build()
+            .unwrap();
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
         cache.get(&path_5m); // add the 10 mb file to the cache
@@ -864,7 +854,10 @@ mod tests {
 
     #[bench]
     fn cache_miss_5mb(b: &mut Bencher) {
-        let cache: Cache = Cache::new(0);
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(0)
+            .build()
+            .unwrap();
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
@@ -892,7 +885,10 @@ mod tests {
     fn cache_get_1mb_from_1000_entry_cache(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-        let cache: Cache = Cache::new(MEG1 * 3); //Cache can hold 3Mb
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 3)
+            .build()
+            .unwrap();
         cache.get(&path_1m); // add the file to the cache
 
         // Add 1024 1kib files to the cache.
@@ -919,7 +915,10 @@ mod tests {
     fn cache_miss_1mb_from_1000_entry_cache(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_1m = create_test_file(&temp_dir, MEG1, FILE_MEG1);
-        let cache: Cache = Cache::new(MEG1); //Cache can hold 1Mb
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1)
+            .build()
+            .unwrap();
 
         // Add 1024 1kib files to the cache.
         for i in 0..1024 {
@@ -943,7 +942,10 @@ mod tests {
     fn cache_miss_5mb_from_1000_entry_cache(b: &mut Bencher) {
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG1);
-        let cache: Cache = Cache::new(MEG5); //Cache can hold 1Mb
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG5)
+            .build()
+            .unwrap();
 
         // Add 1024 5kib files to the cache.
         for i in 0..1024 {
@@ -981,7 +983,10 @@ mod tests {
 
     #[test]
     fn file_exceeds_size_limit() {
-        let cache: Cache = Cache::new(MEG1 * 8); // Cache can hold only 8Mb
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 8) // Cache can hold only 8Mb
+            .build()
+            .unwrap();
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_10m = create_test_file(&temp_dir, MEG10, FILE_MEG10);
 
@@ -1011,7 +1016,10 @@ mod tests {
         imf_5m.stats.priority = 2289;
 
 
-        let cache: Cache = Cache::new(5500000); //Cache can hold only 5.5Mib
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(5500000) //Cache can hold only about 5.5Mib
+            .build()
+            .unwrap();
 
         println!("0:\n{:#?}", cache);
 
@@ -1066,7 +1074,10 @@ mod tests {
         #[allow(unused_variables)]
         let named_file_1m = NamedFile::open(path_1m.clone()).unwrap();
 
-        let cache: Cache = Cache::new(MEG1 * 7 + 2000); // cache can hold a little more than 7MB
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 7 + 2000) // cache can hold a little more than 7MB
+            .build()
+            .unwrap();
 
         println!("1:\n{:#?}", cache);
         let mut imf_5m: InMemoryFile = InMemoryFile::open(path_5m.clone()).unwrap();
@@ -1154,7 +1165,10 @@ mod tests {
 
     #[test]
     fn remove_file() {
-        let cache: Cache = Cache::new(MEG1 * 10);
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 10)
+            .build()
+            .unwrap();
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);
 
@@ -1182,7 +1196,10 @@ mod tests {
 
     #[test]
     fn refresh_file() {
-        let cache: Cache = Cache::new(MEG1 * 10);
+        let cache: Cache = CacheBuilder::new()
+            .size_limit(MEG1 * 10)
+            .build()
+            .unwrap();
 
         let temp_dir = TempDir::new(DIR_TEST).unwrap();
         let path_5m = create_test_file(&temp_dir, MEG5, FILE_MEG5);

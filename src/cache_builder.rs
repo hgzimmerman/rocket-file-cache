@@ -7,7 +7,6 @@ use concurrent_hashmap::{ConcHashMap, Options};
 use std::collections::hash_map::RandomState;
 
 
-
 /// Error types that can be encountered when a cache is built.
 #[derive(Debug, PartialEq)]
 pub enum CacheBuildError {
@@ -30,7 +29,6 @@ impl CacheBuilder {
 
     /// Create a new CacheBuilder.
     ///
-
     pub fn new() -> CacheBuilder {
         CacheBuilder {
             size_limit: None,
@@ -71,18 +69,18 @@ impl CacheBuilder {
     /// refresh the file from the FileSystem, meaning that if there is an error in the cached data,
     /// it will only be served for an average of n/2 accesses before the automatic refresh replaces it
     /// with an assumed correct copy.
-    /// Using ECC RAM should mitigate the possibility of bitrot.
     ///
     /// # Panics
-    /// This function will panic if a 0 or 1 are supplied.
-    /// Something modulo 0 (used when calculating if the file will refresh) will result in an error later.
-    /// The cache would try to refresh on every access if 1 was used as the value, which is less
-    /// efficient than just accessing the files directly.
+    /// This function will panic if 0 is supplied.
+    /// This is to prevent 0 being used as a divisor in a modulo operation later.
     ///
     pub fn accesses_per_refresh<'a>(&'a mut self, accesses: usize) -> &mut Self {
-        if accesses < 2 {
+        if accesses < 1 {
             panic!("Incorrectly configured access_per_refresh rate. Values of 0 or 1 are not allowed.");
         } else {
+            if accesses == 1 {
+                warn!("The accesses_per_refresh value of 1 should not be used except in a development environment. This will cause the cache to refresh the file every time it is requested, negating its purpose as a cache.");
+            }
             self.accesses_per_refresh = Some(accesses);
         }
         self
@@ -105,7 +103,7 @@ impl CacheBuilder {
     /// ```
     /// use rocket_file_cache::Cache;
     /// use rocket_file_cache::CacheBuilder;
-    /// let cache: Cache = CacheBuilder::new(1024 * 1024 * 50) // 50 MB cache
+    /// let cache: Cache = CacheBuilder::new()
     ///     .priority_function(|access_count, size| {
     ///         access_count * access_count * size
     ///     })
@@ -137,7 +135,8 @@ impl CacheBuilder {
     /// use rocket_file_cache::Cache;
     /// use rocket_file_cache::CacheBuilder;
     ///
-    /// let cache: Cache = CacheBuilder::new(1024 * 1024 * 50) // 50 MB cache
+    /// let cache: Cache = CacheBuilder::new()
+    ///     .size_limit(1024 * 1024 * 50) // 50 MB cache
     ///     .min_file_size(1024 * 4) // Don't store files smaller than 4 KB
     ///     .max_file_size(1024 * 1024 * 6) // Don't store files larger than 6 MB
     ///     .build()

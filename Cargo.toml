@@ -1,6 +1,6 @@
 [package]
 name = "rocket-file-cache"
-version = "0.12.0"
+version = "1.0.0-beta"
 authors = ["Henry Zimmerman <zimhen7@gmail.com>"]
 exclude = [
 ]
@@ -15,7 +15,7 @@ documentation = "https://docs.rs/crate/rocket-file-cache"
 license-file = "LICENSE"
 
 [dependencies]
-rocket = "0.3.5"
+rocket = "0.3.6"
 log = "0.3.8"
 concurrent-hashmap = "0.2.2"
 
