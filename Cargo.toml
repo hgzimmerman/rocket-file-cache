@@ -1,9 +1,11 @@
 [package]
 name = "rocket-file-cache"
-version = "1.0.0-beta"
+version = "1.0.0"
 authors = ["Henry Zimmerman <zimhen7@gmail.com>"]
 exclude = [
 ]
+
+
 
 description = "An in-memory file cache for the Rocket web framework."
 readme = "README.md"
@@ -11,14 +13,22 @@ readme = "README.md"
 homepage = "https://github.com/hgzimmerman/rocket-file-cache"
 repository = "https://github.com/hgzimmerman/rocket-file-cache"
 documentation = "https://docs.rs/crate/rocket-file-cache"
+license = "MIT"
 
-license-file = "LICENSE"
+[badges]
+# There may be a small push in the near future where this is marked deprecated.
+# I am working on abstracting the caching mechanism used in this crate into a more flexable crate,
+# from which a non Rocket-centric web-file-cache can be built.
+# When that is finished, I will mark this crate as deprecated and suggest a migration to the new one.
+# Expect minor breaking changes.
+maintenance = {status = "passively-maintained"}
 
 [dependencies]
-rocket = "0.3.6"
-log = "0.3.8"
+rocket = "0.4"
+log = "0.4.6"
 concurrent-hashmap = "0.2.2"
 
 [dev-dependencies]
-tempdir = "0.3.5"
-rand = "0.3"
+tempdir = "0.3.7"
+rand = "0.6.4"
+

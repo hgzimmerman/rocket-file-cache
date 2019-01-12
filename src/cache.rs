@@ -106,7 +106,7 @@ impl Cache {
     /// }
     /// # }
     /// ```
-    pub fn get<'a, P: AsRef<Path>>(&'a self, path: P) -> CachedFile<'a> {
+    pub fn get<P: AsRef<Path>>(&self, path: P) -> CachedFile {
         trace!("{:#?}", self);
         // First, try to get the file in the cache that corresponds to the desired path.
 
@@ -681,7 +681,7 @@ mod tests {
 
     use self::tempdir::TempDir;
     use self::test::Bencher;
-    use self::rand::{StdRng, Rng};
+    use self::rand::rngs::StdRng;
     use std::io::{Write, BufWriter};
     use std::fs::File;
     use rocket::response::NamedFile;
@@ -691,6 +691,9 @@ mod tests {
     use std::sync::Arc;
     use std::mem;
     use cache_builder::CacheBuilder;
+    use self::rand::FromEntropy;
+    use self::rand::RngCore;
+
 
     const MEG1: usize = 1024 * 1024;
     const MEG2: usize = MEG1 * 2;
@@ -708,7 +711,7 @@ mod tests {
         let path = temp_dir.path().join(name);
         let tmp_file = File::create(path.clone()).unwrap();
         let mut rand_data: Vec<u8> = vec![0u8; size];
-        StdRng::new().unwrap().fill_bytes(rand_data.as_mut());
+        StdRng::from_entropy().fill_bytes(rand_data.as_mut());
         let mut buffer = BufWriter::new(tmp_file);
         buffer.write(&rand_data).unwrap();
         path
